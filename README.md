@@ -263,6 +263,35 @@ curl -s -X POST localhost:8080/api/gateway/drill -d '{"enable":true,"provider":"
 实测（80/20 + 一个故意不可达的 provider）：5 次请求中 1 次命中坏 provider，
 失败 1 次后自动回退，5 次全部成功，状态里能看到 `请求 1 · 失败 1` 和具体错误。
 
+### Agent：真实的 ReAct 循环
+
+```bash
+curl -s -X POST localhost:8080/api/agent/run \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"task":"一线城市住宿上限是多少？","maxSteps":2}'
+```
+
+五个真实工具：`kb_search`（pgvector 检索）、`usage_query`（用量统计）、
+`documents_list`、`calculator`（自写安全求值器，不执行任意代码）、`time_now`。
+
+轨迹是真的，实测一次（33 秒）：
+
+```
+Action       kb_search {"query":"一线城市住宿上限是多少？","top_k":3}  168ms
+Observation  [1] 《差旅与费用报销管理办法_v3.2.pdf》相关度 0.77 一线城市…600 元
+Thought      规则兜底选择 → kb_search（模型原始输出：usage_query）
+Thought      kb_search 已经调用过，不再重复
+Final        一线城市指北京、上海、广州、深圳，住宿费上限为每人每晚600元。
+```
+
+三个设计决定，都是为了「小模型也能跑」：
+
+1. **先检索再规划**：不等模型决定要不要查，先把知识库结果拿到手。
+2. **规则兜底**：qwen2:0.5b 实测几乎永远回 `usage_query`，
+   所以对模型的选择做合理性校验，明显错配就走关键词规则，并在轨迹里注明「规则兜底」。
+3. **幻觉检测**：终答里的数字必须在观察结果里出现过，否则标记「无出处」。
+   实测它把 600 元说成 200 元时，这个检查会亮红。
+
 ### 可观测（真实时间序列）
 
 ```bash

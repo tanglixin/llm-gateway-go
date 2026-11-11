@@ -48,8 +48,9 @@ type Provider struct {
 	errors    int64
 	lastError string
 
-	generate func(ctx context.Context, prompt string, onDelta func(string) error) (string, token.Stats, error)
-	probe    func(ctx context.Context) error
+	generate     func(ctx context.Context, prompt string, onDelta func(string) error) (string, token.Stats, error)
+	generateOpts func(ctx context.Context, prompt string, onDelta func(string) error, o GenOpts) (string, token.Stats, error)
+	probe        func(ctx context.Context) error
 }
 
 // Status 是给前端看的 provider 状态。
@@ -162,6 +163,29 @@ func (g *Gateway) Generate(ctx context.Context, prompt string) (string, token.St
 	return g.run(ctx, prompt, nil)
 }
 
+// GenerateWith 用指定参数生成（小模型需要限制输出长度，否则会跑偏）。
+func (g *Gateway) GenerateWith(ctx context.Context, prompt string, o GenOpts) (string, token.Stats, string, error) {
+	tried := make(map[*Provider]bool, len(g.providers))
+	for len(tried) < len(g.providers) {
+		p := g.next()
+		if p == nil || tried[p] {
+			break
+		}
+		tried[p] = true
+
+		c, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		answer, usage, err := p.generateOpts(c, prompt, nil, o)
+		cancel()
+		if err != nil {
+			p.onFailure(err)
+			continue
+		}
+		p.onSuccess()
+		return answer, usage, p.Name, nil
+	}
+	return "", token.Stats{}, "", ErrNoProvider
+}
+
 // GenerateStream 流式生成，同样支持故障转移。
 // 注意：开始推流后再失败就没法换 provider 了（已经发出去了），只能在选之前换。
 func (g *Gateway) GenerateStream(ctx context.Context, prompt string, onDelta func(string) error) (string, token.Stats, string, error) {
@@ -264,7 +288,10 @@ func NewOllamaProvider(name, baseURL, model string, weight int) (*Provider, erro
 	}
 	p := &Provider{Name: name, Kind: "ollama", Model: model, Weight: weight}
 	p.generate = func(ctx context.Context, prompt string, onDelta func(string) error) (string, token.Stats, error) {
-		return generateWith(ctx, client, prompt, onDelta)
+		return generateWithOpts(ctx, client, prompt, onDelta, GenOpts{})
+	}
+	p.generateOpts = func(ctx context.Context, prompt string, onDelta func(string) error, o GenOpts) (string, token.Stats, error) {
+		return generateWithOpts(ctx, client, prompt, onDelta, o)
 	}
 	p.probe = func(ctx context.Context) error { return probeURL(ctx, baseURL+"/api/tags") }
 	return p, nil
@@ -285,14 +312,29 @@ func NewOpenAIProvider(name, baseURL, apiKey, model string, weight int) (*Provid
 	}
 	p := &Provider{Name: name, Kind: "openai", Model: model, Weight: weight}
 	p.generate = func(ctx context.Context, prompt string, onDelta func(string) error) (string, token.Stats, error) {
-		return generateWith(ctx, client, prompt, onDelta)
+		return generateWithOpts(ctx, client, prompt, onDelta, GenOpts{})
+	}
+	p.generateOpts = func(ctx context.Context, prompt string, onDelta func(string) error, o GenOpts) (string, token.Stats, error) {
+		return generateWithOpts(ctx, client, prompt, onDelta, o)
 	}
 	p.probe = func(ctx context.Context) error { return probeURL(ctx, baseURL+"/models") }
 	return p, nil
 }
 
-func generateWith(ctx context.Context, m llms.Model, prompt string, onDelta func(string) error) (string, token.Stats, error) {
-	opts := []llms.CallOption{llms.WithMaxTokens(512)}
+// GenOpts 是单次生成的参数。
+type GenOpts struct {
+	MaxTokens   int
+	Temperature float64
+}
+
+func generateWithOpts(ctx context.Context, m llms.Model, prompt string, onDelta func(string) error, o GenOpts) (string, token.Stats, error) {
+	if o.MaxTokens <= 0 {
+		o.MaxTokens = 512
+	}
+	opts := []llms.CallOption{llms.WithMaxTokens(o.MaxTokens)}
+	if o.Temperature > 0 {
+		opts = append(opts, llms.WithTemperature(o.Temperature))
+	}
 	var sb stringsBuilder
 	if onDelta != nil {
 		opts = append(opts, llms.WithStreamingFunc(func(_ context.Context, chunk []byte) error {

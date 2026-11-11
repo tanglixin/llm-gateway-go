@@ -48,7 +48,7 @@
 | POST | `/api/documents/{id}/retry` | — | ✅ 重置阶段并重新入队 |
 | POST | `/api/retrieval/search` | `{query, mode, topK}` | ✅ `mode` = bm25 / vector / hybrid |
 | POST | `/api/retrieval/evaluate` | — | ✅ 7 条 Golden Set × 3 模式，返回真实指标 |
-| POST | `/api/agent/run` | `{task}` | 返回 ReAct 步骤数组 |
+| POST | `/api/agent/run` | `{task, maxSteps?}` | ✅ 真实 ReAct 循环，返回 `{steps, grounded, unverified, tools}` |
 | POST | `/api/gateway/drill` | `{enable}` | 故障演练开关 |
 | POST | `/api/eval/run` | `{version}` | 触发回归，返回结果 |
 | POST | `/api/ops/backup` | — | 触发备份 |

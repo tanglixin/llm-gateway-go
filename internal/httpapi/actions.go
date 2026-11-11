@@ -130,16 +130,6 @@ func buildRAGPrompt(cites []Cite, contextText, question string) string {
 		"\n问题：" + question + "\n回答："
 }
 
-// agentRun 返回一次 ReAct 轨迹（当前是回放种子数据）。
-func (s *Server) agentRun(c *gin.Context) {
-	var in struct {
-		Task string `json:"task"`
-	}
-	_ = c.ShouldBindJSON(&in)
-	steps := s.data.AgentSteps()
-	c.JSON(http.StatusOK, gin.H{"task": in.Task, "runId": fmt.Sprintf("run_%d", time.Now().Unix()%10000), "steps": steps})
-}
-
 // gatewayDrill 真实演练：强制把 provider 标成熔断，观察流量走向。
 func (s *Server) gatewayDrill(c *gin.Context) {
 	var in struct {
