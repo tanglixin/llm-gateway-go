@@ -50,7 +50,9 @@
 | POST | `/api/retrieval/evaluate` | — | ✅ 7 条 Golden Set × 3 模式，返回真实指标 |
 | POST | `/api/agent/run` | `{task, maxSteps?}` | ✅ 真实 ReAct 循环，返回 `{steps, grounded, unverified, tools}` |
 | POST | `/api/gateway/drill` | `{enable}` | 故障演练开关 |
-| POST | `/api/eval/run` | `{version}` | 触发回归，返回结果 |
+| GET | `/api/eval/versions` | — | 版本列表 + 最近一次评测 + Golden Set |
+| POST | `/api/eval/run` | `{version?}` | ✅ 跑真实检索指标并落库 |
+| POST | `/api/eval/activate` | `{version}` | ✅ 切换生效版本（admin） |
 | POST | `/api/ops/backup` | — | 触发备份 |
 | POST | `/api/ops/restore` | `{backupId}` | 恢复演练 |
 | PATCH | `/api/ops/checklist/{id}` | `{done}` | 勾选检查项 |

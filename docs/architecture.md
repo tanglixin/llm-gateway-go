@@ -92,6 +92,20 @@ GROUP BY to_char(created_at,'MM-DD') → 近 7 天
 - **成本公式只有一处**：`store.cost()`，前端只是展示
 - 注意 `avg()` / `percentile_cont()` 返回 numeric，扫进 `int64` 会报错，必须 `::bigint`
 
+## 评测
+
+```
+prompt_versions（模板 + retrieval_mode + top_k + is_active）
+        │
+        ├─ eval/run  → 对每个版本跑 7 条 Golden Set → 算 Recall/MRR/NDCG → gate
+        └─ chat      → 读 is_active 版本，按其模板与配置检索并生成
+```
+
+- **版本不只是标签**：模板、检索模式、topK 都存在库里，切换立刻生效
+- **指标是真实检索结果算出来的**：v4 只取 1 篇 + 纯 BM25，召回掉到 0.714 被闸门拦住
+- **没有 LLM 裁判**：Faithfulness 那种指标要模型打分，成本高且不稳定，
+  这里只算可确定的检索指标——**宁可少一个指标，不要一个假指标**
+
 ## Trace
 
 ```

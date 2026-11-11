@@ -61,6 +61,9 @@ func run() error {
 	if err := seedUsers(context.Background(), db, log); err != nil {
 		return err
 	}
+	if err := seedPromptVersions(context.Background(), db); err != nil {
+		return err
+	}
 	log.Info("postgres ready", "dsn", cfg.PostgresDSN)
 
 	tp, err := tracing.Init(context.Background(), db)
@@ -156,6 +159,29 @@ func buildGateway(cfg config.Config) (*gateway.Gateway, error) {
 		return nil, fmt.Errorf("no providers configured")
 	}
 	return gateway.New(providers), nil
+}
+
+// seedPromptVersions 写入内置提示词版本（已存在则更新）。
+func seedPromptVersions(ctx context.Context, db *store.Store) error {
+	versions := []store.PromptVersion{
+		{Name: "prompt_v1", Description: "基线 CoT，纯向量检索", RetrievalMode: "vector", TopK: 3,
+			Template: "请一步步思考后回答。\n\n资料：\n{{context}}\n问题：{{question}}\n回答："},
+		{Name: "prompt_v2", Description: "混合检索 + 先结论后依据", RetrievalMode: "hybrid", TopK: 3,
+			Template: "根据资料回答问题，先给结论再给依据。\n\n资料：\n{{context}}\n问题：{{question}}\n回答："},
+		{Name: "prompt_v3", Description: "混合检索 + 强制引用编号（当前生效）", RetrievalMode: "hybrid", TopK: 3,
+			Template: "根据资料回答问题，不要编造资料里没有的内容，并在结论后标注引用编号。\n\n资料：\n{{context}}\n问题：{{question}}\n回答："},
+		{Name: "prompt_v4", Description: "实验版：只用 BM25 且只取 1 篇", RetrievalMode: "bm25", TopK: 1,
+			Template: "根据资料回答问题。\n\n资料：\n{{context}}\n问题：{{question}}\n回答："},
+	}
+	for _, v := range versions {
+		if err := db.UpsertPromptVersion(ctx, v); err != nil {
+			return err
+		}
+	}
+	if _, err := db.ActivePromptVersion(ctx); err != nil {
+		return db.ActivatePromptVersion(ctx, "prompt_v3")
+	}
+	return nil
 }
 
 // demoTenant 是演示数据的归属租户，与种子用户一致。

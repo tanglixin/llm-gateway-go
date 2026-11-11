@@ -143,14 +143,16 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 	}
 
 	// RAG：先检索，把片段拼进提示词
+	version := s.activeVersion(ctx)
 	retrieveCtx, retrieveSpan := tracing.Tracer().Start(ctx, "rag.retrieve")
-	cites, ctxText := s.retrieve(retrieveCtx, s.tenantOf(c), prompt, 3)
-	retrieveSpan.SetAttributes(tracing.Int("cites", len(cites)))
+	cites, ctxText := s.retrieve(retrieveCtx, s.tenantOf(c), prompt, version.RetrievalMode, version.TopK)
+	retrieveSpan.SetAttributes(tracing.Int("cites", len(cites)), tracing.Attr("prompt.version", version.Name))
 	retrieveSpan.End()
 
 	start := time.Now()
 	genCtx, genSpan := tracing.Tracer().Start(ctx, "llm.generate")
-	answer, usage, provider, err := s.gw.Generate(genCtx, buildRAGPrompt(cites, ctxText, prompt))
+	genSpan.SetAttributes(tracing.Attr("prompt.version", version.Name))
+	answer, usage, provider, err := s.gw.Generate(genCtx, renderPrompt(version.Template, ctxText, prompt))
 	genSpan.SetAttributes(tracing.Attr("llm.provider", provider), tracing.Int("llm.prompt_tokens", usage.Prompt))
 	genSpan.End()
 	latency := time.Since(start)
@@ -208,9 +210,10 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	c.Writer.WriteHeader(http.StatusOK)
 	c.Writer.Flush()
 
+	version := s.activeVersion(ctx)
 	retrieveCtx, retrieveSpan := tracing.Tracer().Start(ctx, "rag.retrieve")
-	cites, ctxText := s.retrieve(retrieveCtx, s.tenantOf(c), prompt, 3)
-	retrieveSpan.SetAttributes(tracing.Int("cites", len(cites)))
+	cites, ctxText := s.retrieve(retrieveCtx, s.tenantOf(c), prompt, version.RetrievalMode, version.TopK)
+	retrieveSpan.SetAttributes(tracing.Int("cites", len(cites)), tracing.Attr("prompt.version", version.Name))
 	retrieveSpan.End()
 
 	start := time.Now()
@@ -220,7 +223,7 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	genCtx, genSpan := tracing.Tracer().Start(ctx, "llm.generate.stream")
 	defer genSpan.End()
 
-	answer, usage, provider, err := s.gw.GenerateStream(genCtx, buildRAGPrompt(cites, ctxText, prompt), func(delta string) error {
+	answer, usage, provider, err := s.gw.GenerateStream(genCtx, renderPrompt(version.Template, ctxText, prompt), func(delta string) error {
 		if firstToken == 0 {
 			firstToken = time.Since(start)
 		}
@@ -266,6 +269,7 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 			"latencyMs": latency.Milliseconds(),
 			"model":     s.gw.PrimaryModel(),
 			"provider":  provider,
+			"version":   version.Name,
 			"cites":     cites,
 		})
 		_ = sseRaw(c, "[DONE]")

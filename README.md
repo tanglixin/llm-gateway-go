@@ -263,6 +263,28 @@ curl -s -X POST localhost:8080/api/gateway/drill -d '{"enable":true,"provider":"
 实测（80/20 + 一个故意不可达的 provider）：5 次请求中 1 次命中坏 provider，
 失败 1 次后自动回退，5 次全部成功，状态里能看到 `请求 1 · 失败 1` 和具体错误。
 
+### 评测：真实版本回归与 CI 闸门
+
+Prompt 版本存在 `prompt_versions` 表里，每个版本有自己的**模板**和**检索配置**：
+
+| 版本 | 检索配置 | Recall@5 | 闸门 |
+| --- | --- | --- | --- |
+| prompt_v1 基线 CoT | vector, top3 | 0.857 | 通过 |
+| prompt_v2 先结论后依据 | hybrid, top3 | 1.000 | 通过 |
+| prompt_v3 强制引用（生效中） | hybrid, top3 | 1.000 | 通过 |
+| prompt_v4 实验版 | bm25, top1 | 0.714 | **阻断** |
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/eval/versions
+curl -s -X POST -H "Authorization: Bearer $TOKEN" localhost:8080/api/eval/run      # 跑全部版本
+curl -s -X POST -H "Authorization: Bearer $TOKEN" localhost:8080/api/eval/activate   -d '{"version":"prompt_v2"}'                                                    # 切换生效版本
+```
+
+- 回归跑的是**真实检索指标**（7 条 Golden Set × 该版本的检索配置），一次约 20 秒
+- `Recall@5 < 0.80` 直接标 `blocked`，这就是 CI 闸门
+- **切换版本会真的改变对话行为**：模板和 topK/检索模式都从数据库读
+- 版本表、用例表、KPI 全部来自接口，不是样例
+
 ### Trace：OpenTelemetry 接进 PostgreSQL
 
 ```bash

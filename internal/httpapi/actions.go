@@ -91,14 +91,17 @@ func (s *Server) retrievalSearch(c *gin.Context) {
 	})
 }
 
-// retrieve 供 RAG 用：取 top-k 片段并拼成上下文。
-func (s *Server) retrieve(ctx context.Context, tenant, query string, k int) ([]Cite, string) {
-	vec, err := s.emb.Embed(ctx, query)
-	if err != nil {
-		return nil, ""
+// retrieve 供 RAG 用：按当前版本的模式取片段并拼成上下文。
+func (s *Server) retrieve(ctx context.Context, tenant, query, mode string, k int) ([]Cite, string) {
+	if mode == "" {
+		mode = "hybrid"
 	}
-	hits, err := s.db.SearchChunks(ctx, tenant, vec, k)
-	if err != nil {
+	if k <= 0 {
+		k = 3
+	}
+
+	hits, err := s.searchAll(ctx, tenant, query, mode, k, defaultAlpha)
+	if err != nil || len(hits) == 0 {
 		return nil, ""
 	}
 
@@ -115,6 +118,16 @@ func (s *Server) retrieve(ctx context.Context, tenant, query string, k int) ([]C
 		fmt.Fprintf(&sb, "[%d] 来源：%s\n%s\n\n", i+1, h.Name, h.Content)
 	}
 	return cites, sb.String()
+}
+
+// renderPrompt 用版本模板渲染提示词；模板里用 {{context}} 和 {{question}} 占位。
+func renderPrompt(tpl, contextText, question string) string {
+	if tpl == "" {
+		return buildRAGPrompt(nil, contextText, question)
+	}
+	out := strings.ReplaceAll(tpl, "{{context}}", contextText)
+	out = strings.ReplaceAll(out, "{{question}}", question)
+	return out
 }
 
 // buildRAGPrompt 把检索结果拼进提示词。
@@ -148,28 +161,6 @@ func (s *Server) gatewayDrill(c *gin.Context) {
 		"enabled":   in.Enable,
 		"providers": s.gw.Status(),
 		"message":   msg,
-	})
-}
-
-// evalRun 触发一次回归（同步返回结果，真实实现应改成异步任务）。
-func (s *Server) evalRun(c *gin.Context) {
-	var in struct {
-		Version string `json:"version"`
-	}
-	_ = c.ShouldBindJSON(&in)
-	if in.Version == "" {
-		in.Version = "prompt_v3"
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"version":      in.Version,
-		"total":        128,
-		"passed":       116,
-		"faithfulness": 0.914,
-		"baseline":     0.89,
-		"recallAt5":    0.93,
-		"gate":         "passed",
-		"tookSeconds":  96,
-		"finishedAt":   time.Now().Format(time.RFC3339),
 	})
 }
 
