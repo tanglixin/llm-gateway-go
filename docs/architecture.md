@@ -92,6 +92,21 @@ GROUP BY to_char(created_at,'MM-DD') → 近 7 天
 - **成本公式只有一处**：`store.cost()`，前端只是展示
 - 注意 `avg()` / `percentile_cont()` 返回 numeric，扫进 `int64` 会报错，必须 `::bigint`
 
+## Trace
+
+```
+middleware ─▶ /api/chat (server span)
+                 ├─ rag.retrieve   (internal)
+                 └─ llm.generate   (internal, 带 provider / tokens 属性)
+                        ↓
+           自建 exporter（批量 200ms）→ spans 表 → /api/observability/traces
+```
+
+- **不用 Jaeger**：一个 exporter 就够。要接 OTLP 只替换 `Init` 里的 exporter
+- **批处理**：每 200ms 刷一次，避免每个 span 一次插入
+- **采样**：`AlwaysSample`。生产应改成头部采样 + 错误全采
+- **噪音过滤**：`/assets/*`、`/favicon.ico`、`/healthz`、`/readyz` 不产生 trace
+
 ## Agent
 
 ```
@@ -280,7 +295,7 @@ main.ts
 | 项 | 现状 | 影响 |
 | --- | --- | --- |
 | 看板数据 | 总览/成本/检索/可观测已接真实聚合；评测与安全仍是种子 | 剩余页面结构已定型，换 SQL 即可 |
-| Trace | 回放页是示例 span | 真实链路要接 OTel SDK + collector |
+| Trace | 真实 OTel span，写 Postgres | 没有 collector/后端 UI，查询靠自己写的接口 |
 | 网关熔断状态 | 只在内存 | 重启清零，多实例之间不同步 |
 | 鉴权 | HS256 + 单密钥 | 无刷新 token、无吊销；多实例需共享 JWT_SECRET |
 | 角色 | admin / member 两级 | 没有细粒度权限表，也没有角色管理界面 |

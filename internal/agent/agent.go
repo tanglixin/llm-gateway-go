@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/llm-gateway/llm-gateway/internal/tracing"
+
 	"github.com/llm-gateway/llm-gateway/internal/gateway"
 )
 
@@ -84,7 +86,9 @@ func (a *Agent) Run(ctx context.Context, task string) (Result, error) {
 	// 比让它从零挑工具可靠得多。
 	if kb, ok := a.byName["kb_search"]; ok {
 		t0 := time.Now()
-		obs, runErr := kb.Run(ctx, map[string]any{"query": task, "top_k": 3.0})
+		kbCtx, kbSpan := tracing.Tracer().Start(ctx, "agent.tool.kb_search")
+		obs, runErr := kb.Run(kbCtx, map[string]any{"query": task, "top_k": 3.0})
+		kbSpan.End()
 		if runErr != nil {
 			obs = "知识库检索失败：" + runErr.Error()
 		}
@@ -144,7 +148,10 @@ func (a *Agent) Run(ctx context.Context, task string) (Result, error) {
 
 		// 3) 执行
 		t1 := time.Now()
-		obs, runErr := tool.Run(ctx, args)
+		toolCtx, toolSpan := tracing.Tracer().Start(ctx, "agent.tool."+name)
+		toolSpan.SetAttributes(tracing.Attr("agent.tool", name))
+		obs, runErr := tool.Run(toolCtx, args)
+		toolSpan.End()
 		dur := time.Since(t1).Milliseconds()
 		if runErr != nil {
 			obs = "工具报错：" + runErr.Error()

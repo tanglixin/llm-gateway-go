@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/llm-gateway/llm-gateway/internal/store"
+	"github.com/llm-gateway/llm-gateway/internal/tracing"
 )
 
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -142,10 +143,16 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 	}
 
 	// RAG：先检索，把片段拼进提示词
-	cites, ctxText := s.retrieve(ctx, s.tenantOf(c), prompt, 3)
+	retrieveCtx, retrieveSpan := tracing.Tracer().Start(ctx, "rag.retrieve")
+	cites, ctxText := s.retrieve(retrieveCtx, s.tenantOf(c), prompt, 3)
+	retrieveSpan.SetAttributes(tracing.Int("cites", len(cites)))
+	retrieveSpan.End()
 
 	start := time.Now()
-	answer, usage, provider, err := s.gw.Generate(ctx, buildRAGPrompt(cites, ctxText, prompt))
+	genCtx, genSpan := tracing.Tracer().Start(ctx, "llm.generate")
+	answer, usage, provider, err := s.gw.Generate(genCtx, buildRAGPrompt(cites, ctxText, prompt))
+	genSpan.SetAttributes(tracing.Attr("llm.provider", provider), tracing.Int("llm.prompt_tokens", usage.Prompt))
+	genSpan.End()
 	latency := time.Since(start)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "upstream_error", "message": err.Error()}})
@@ -201,13 +208,19 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	c.Writer.WriteHeader(http.StatusOK)
 	c.Writer.Flush()
 
-	cites, ctxText := s.retrieve(ctx, s.tenantOf(c), prompt, 3)
+	retrieveCtx, retrieveSpan := tracing.Tracer().Start(ctx, "rag.retrieve")
+	cites, ctxText := s.retrieve(retrieveCtx, s.tenantOf(c), prompt, 3)
+	retrieveSpan.SetAttributes(tracing.Int("cites", len(cites)))
+	retrieveSpan.End()
 
 	start := time.Now()
 	var firstToken time.Duration
 	broken := false
 
-	answer, usage, provider, err := s.gw.GenerateStream(ctx, buildRAGPrompt(cites, ctxText, prompt), func(delta string) error {
+	genCtx, genSpan := tracing.Tracer().Start(ctx, "llm.generate.stream")
+	defer genSpan.End()
+
+	answer, usage, provider, err := s.gw.GenerateStream(genCtx, buildRAGPrompt(cites, ctxText, prompt), func(delta string) error {
 		if firstToken == 0 {
 			firstToken = time.Since(start)
 		}

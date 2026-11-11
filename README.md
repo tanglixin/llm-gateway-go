@@ -263,6 +263,27 @@ curl -s -X POST localhost:8080/api/gateway/drill -d '{"enable":true,"provider":"
 实测（80/20 + 一个故意不可达的 provider）：5 次请求中 1 次命中坏 provider，
 失败 1 次后自动回退，5 次全部成功，状态里能看到 `请求 1 · 失败 1` 和具体错误。
 
+### Trace：OpenTelemetry 接进 PostgreSQL
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/observability/traces
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/observability/traces/<traceId>
+```
+
+用官方 OTel SDK 埋点，**自建 exporter 把 span 写进 Postgres**——没有引入 Jaeger/Tempo 容器，
+换 OTLP 只改 `internal/tracing.Init` 里的一行。
+
+实测一次问答的瀑布图：
+
+```
+/api/chat        18574 ms   ← server span
+  rag.retrieve    1959 ms   ← 检索（含 embedding 冷启动）
+  llm.generate   16572 ms   ← 模型生成
+```
+
+span 属性也落库了（`http.method`、`llm.provider`、`llm.prompt_tokens`、`cites` 等）。
+静态资源和探针不产生 trace，否则 trace 列表里全是 favicon。
+
 ### Agent：真实的 ReAct 循环
 
 ```bash

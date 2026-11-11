@@ -21,6 +21,7 @@ import (
 	"github.com/llm-gateway/llm-gateway/internal/queue"
 	"github.com/llm-gateway/llm-gateway/internal/search"
 	"github.com/llm-gateway/llm-gateway/internal/store"
+	"github.com/llm-gateway/llm-gateway/internal/tracing"
 )
 
 // Server 聚合 handler 依赖。
@@ -45,7 +46,7 @@ func New(cfg config.Config, jwtMgr *auth.Manager, gw *gateway.Gateway, client *l
 	s := &Server{cfg: cfg, jwt: jwtMgr, gw: gw, llm: client, emb: emb, data: st, db: db, blob: bl, queue: q}
 
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(gin.Logger(), gin.Recovery(), tracing.Middleware())
 
 	// /api/* 需要登录；健康检查与登录本身公开
 	api := r.Group("/api", s.jwt.Middleware())
@@ -60,6 +61,8 @@ func New(cfg config.Config, jwtMgr *auth.Manager, gw *gateway.Gateway, client *l
 	api.GET("/meta/pages", s.pagesMeta)
 	api.GET("/usage/summary", s.usageSummary)
 	api.GET("/observability/series", s.observability)
+	api.GET("/observability/traces", s.listTraces)
+	api.GET("/observability/traces/:traceId", s.getTrace)
 	api.GET("/gateway/status", s.gatewayStatus)
 
 	// 会话（持久化）
