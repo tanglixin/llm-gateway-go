@@ -129,7 +129,7 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 	// 用户消息先落库（短超时；此时还没有生成）
 	userCtx, cancelUser := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	userMsg, err := s.db.AppendMessage(userCtx, convID, store.Message{
-		Role: "user", Content: prompt, Model: s.llm.Model(),
+		Role: "user", Content: prompt, Model: s.gw.PrimaryModel(),
 	})
 	cancelUser()
 	if err != nil {
@@ -141,7 +141,7 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 	cites, ctxText := s.retrieve(ctx, prompt, 3)
 
 	start := time.Now()
-	answer, usage, err := s.llm.Generate(ctx, buildRAGPrompt(cites, ctxText, prompt))
+	answer, usage, provider, err := s.gw.Generate(ctx, buildRAGPrompt(cites, ctxText, prompt))
 	latency := time.Since(start)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "upstream_error", "message": err.Error()}})
@@ -152,7 +152,7 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 	asstCtx, cancelAsst := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancelAsst()
 	assistantMsg, err := s.db.AppendMessage(asstCtx, convID, store.Message{
-		Role: "assistant", Content: answer, Model: s.llm.Model(),
+		Role: "assistant", Content: answer, Model: s.gw.PrimaryModel(),
 		TokensIn: usage.Prompt, TokensOut: usage.Completion, LatencyMs: int(latency.Milliseconds()),
 	})
 	if err != nil {
@@ -166,7 +166,8 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 		"messageId":      assistantMsg.ID,
 		"answer":         answer,
 		"usage":          usage,
-		"model":          s.llm.Model(),
+		"model":          s.gw.PrimaryModel(),
+		"provider":       provider,
 		"latencyMs":      latency.Milliseconds(),
 		"cites":          cites,
 	})
@@ -178,7 +179,7 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 
 	userCtx, cancelUser := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	userMsg, err := s.db.AppendMessage(userCtx, convID, store.Message{
-		Role: "user", Content: prompt, Model: s.llm.Model(),
+		Role: "user", Content: prompt, Model: s.gw.PrimaryModel(),
 	})
 	cancelUser()
 	if err != nil {
@@ -202,7 +203,7 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	var firstToken time.Duration
 	broken := false
 
-	answer, usage, err := s.llm.GenerateStream(ctx, buildRAGPrompt(cites, ctxText, prompt), func(delta string) error {
+	answer, usage, provider, err := s.gw.GenerateStream(ctx, buildRAGPrompt(cites, ctxText, prompt), func(delta string) error {
 		if firstToken == 0 {
 			firstToken = time.Since(start)
 		}
@@ -228,7 +229,7 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	defer cancelAsst()
 	if answer != "" || usage.Prompt > 0 {
 		if _, perr := s.db.AppendMessage(asstCtx, convID, store.Message{
-			Role: "assistant", Content: answer, Model: s.llm.Model(),
+			Role: "assistant", Content: answer, Model: s.gw.PrimaryModel(),
 			TokensIn: usage.Prompt, TokensOut: usage.Completion, LatencyMs: int(latency.Milliseconds()),
 		}); perr != nil {
 			log.Printf("persist assistant message failed: %v", perr)
@@ -246,7 +247,8 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 			},
 			"ttftMs":    firstToken.Milliseconds(),
 			"latencyMs": latency.Milliseconds(),
-			"model":     s.llm.Model(),
+			"model":     s.gw.PrimaryModel(),
+			"provider":  provider,
 			"cites":     cites,
 		})
 		_ = sseRaw(c, "[DONE]")

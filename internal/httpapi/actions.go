@@ -140,16 +140,24 @@ func (s *Server) agentRun(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"task": in.Task, "runId": fmt.Sprintf("run_%d", time.Now().Unix()%10000), "steps": steps})
 }
 
-// gatewayDrill 打开/关闭故障演练，返回演练期间的 provider 状态。
+// gatewayDrill 真实演练：强制把 provider 标成熔断，观察流量走向。
 func (s *Server) gatewayDrill(c *gin.Context) {
 	var in struct {
-		Enable bool `json:"enable"`
+		Enable   bool   `json:"enable"`
+		Provider string `json:"provider"`
 	}
 	_ = c.ShouldBindJSON(&in)
+
+	s.gw.Drill(in.Enable, in.Provider)
+
+	msg := "演练已重置，熔断器全部闭合"
+	if in.Enable {
+		msg = "已强制熔断，请求会被路由到其余 provider"
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"enabled":   in.Enable,
-		"providers": s.data.Providers(in.Enable),
-		"message":   map[bool]string{true: "熔断器 OPEN，流量已切到备用模型", false: "演练已重置"}[in.Enable],
+		"providers": s.gw.Status(),
+		"message":   msg,
 	})
 }
 

@@ -188,6 +188,30 @@ curl -s 'localhost:8080/api/usage/summary?range=all'   # 或 range=today
 
 总览页与成本页的 KPI、成本页的「最近调用」表都来自这个接口，不是样例数字。
 
+### AI 网关：多 provider 路由
+
+```bash
+curl -s localhost:8080/api/gateway/status
+curl -s -X POST localhost:8080/api/gateway/drill -d '{"enable":true,"provider":"本地 Ollama"}'
+```
+
+用 `GATEWAY_PROVIDERS`（JSON）配置，不配就是单个 Ollama：
+
+```json
+[
+  {"name":"本地 Ollama","kind":"ollama","baseUrl":"http://127.0.0.1:11434","model":"qwen2:0.5b","weight":80},
+  {"name":"云端 API","kind":"openai","baseUrl":"https://api.openai.com/v1","model":"gpt-4o-mini","token":"sk-...","weight":20}
+]
+```
+
+- **平滑加权轮询**（nginx 算法）：80/20 会变成 `A A A A B` 的均匀分布，不是前 8 次全是 A
+- **熔断**：连续失败 3 次断开 30 秒，之后半开试探一次
+- **故障转移**：选中的 provider 失败会自动换下一个，响应里带 `provider` 字段说明谁服务的
+- **演练**：`/api/gateway/drill` 强制某个 provider 熔断，用来看流量是否真的切走
+
+实测（80/20 + 一个故意不可达的 provider）：5 次请求中 1 次命中坏 provider，
+失败 1 次后自动回退，5 次全部成功，状态里能看到 `请求 1 · 失败 1` 和具体错误。
+
 ### 可观测（真实时间序列）
 
 ```bash

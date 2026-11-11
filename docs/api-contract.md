@@ -65,6 +65,8 @@
 | GET | `/api/meta/pages` | 12 页面的标题/FR/周次（供 design 页矩阵用） |
 | GET | `/api/usage/summary` | ✅ 真实用量聚合（`?range=today`） |
 | GET | `/api/observability/series` | ✅ 按分钟时间序列 + 最近调用（`?minutes=180`） |
+| GET | `/api/gateway/status` | ✅ 各 provider 熔断状态与计数 |
+| POST | `/api/gateway/drill` | ✅ 强制熔断某个 provider（真实生效） |
 
 ## 四、前端如何消费
 

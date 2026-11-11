@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,6 +16,7 @@ import (
 	"github.com/llm-gateway/llm-gateway/internal/config"
 	"github.com/llm-gateway/llm-gateway/internal/data"
 	"github.com/llm-gateway/llm-gateway/internal/etl"
+	"github.com/llm-gateway/llm-gateway/internal/gateway"
 	"github.com/llm-gateway/llm-gateway/internal/httpapi"
 	"github.com/llm-gateway/llm-gateway/internal/kb"
 	"github.com/llm-gateway/llm-gateway/internal/llm"
@@ -38,6 +40,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
+	gw, err := buildGateway(cfg)
+	if err != nil {
+		return err
+	}
+	log.Info("gateway ready", "providers", gw.Names())
 
 	db, err := store.Open(context.Background(), cfg.PostgresDSN)
 	if err != nil {
@@ -82,7 +90,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.New(cfg, client, emb, data.New(), db, bl, q),
+		Handler:           httpapi.New(cfg, gw, client, emb, data.New(), db, bl, q),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -107,4 +115,29 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// buildGateway 按配置构造 provider 列表。
+func buildGateway(cfg config.Config) (*gateway.Gateway, error) {
+	providers := make([]*gateway.Provider, 0, len(cfg.Providers))
+	for _, pc := range cfg.Providers {
+		var (
+			p   *gateway.Provider
+			err error
+		)
+		switch pc.Kind {
+		case "openai":
+			p, err = gateway.NewOpenAIProvider(pc.Name, pc.BaseURL, pc.Token, pc.Model, pc.Weight)
+		default:
+			p, err = gateway.NewOllamaProvider(pc.Name, pc.BaseURL, pc.Model, pc.Weight)
+		}
+		if err != nil {
+			return nil, err
+		}
+		providers = append(providers, p)
+	}
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("no providers configured")
+	}
+	return gateway.New(providers), nil
 }

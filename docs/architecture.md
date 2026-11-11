@@ -92,6 +92,22 @@ GROUP BY to_char(created_at,'MM-DD') → 近 7 天
 - **成本公式只有一处**：`store.cost()`，前端只是展示
 - 注意 `avg()` / `percentile_cont()` 返回 numeric，扫进 `int64` 会报错，必须 `::bigint`
 
+## AI 网关
+
+```
+chat handler → gateway.Generate/GenerateStream
+                    │
+                    ├─ 平滑加权轮询选 provider（跳过 open 的）
+                    ├─ 调用；失败 → onFailure（累计到 3 次则 open 30s）
+                    ├─ 成功 → onSuccess（清零失败计数）
+                    └─ 失败则换下一个，全失败返回 ErrNoProvider
+```
+
+- **流式不能换车**：一旦开始推 SSE，provider 失败就没法回退了，只能报错。
+  非流式才有完整重试链。
+- **熔断状态在内存里**：重启清零。真要持久化得存 Redis，对内部服务没必要。
+- **provider 抽象**：`generate` 与 `probe` 是闭包，新增一种 provider 只要构造两个函数。
+
 ## 可观测
 
 `GET /api/observability/series?minutes=N` 按分钟分桶：
@@ -226,6 +242,7 @@ main.ts
 | --- | --- | --- |
 | 看板数据 | 总览/成本/检索/可观测已接真实聚合；评测与安全仍是种子 | 剩余页面结构已定型，换 SQL 即可 |
 | Trace | 回放页是示例 span | 真实链路要接 OTel SDK + collector |
+| 网关熔断状态 | 只在内存 | 重启清零，多实例之间不同步 |
 | 检索策略 | BM25 + 向量 + 加权分数融合 | 混合与纯 BM25 持平，语料小时难以拉开差距 |
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |

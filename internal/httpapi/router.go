@@ -15,6 +15,7 @@ import (
 	"github.com/llm-gateway/llm-gateway/internal/blob"
 	"github.com/llm-gateway/llm-gateway/internal/config"
 	"github.com/llm-gateway/llm-gateway/internal/data"
+	"github.com/llm-gateway/llm-gateway/internal/gateway"
 	"github.com/llm-gateway/llm-gateway/internal/llm"
 	"github.com/llm-gateway/llm-gateway/internal/queue"
 	"github.com/llm-gateway/llm-gateway/internal/search"
@@ -24,6 +25,7 @@ import (
 // Server 聚合 handler 依赖。
 type Server struct {
 	cfg   config.Config
+	gw    *gateway.Gateway
 	llm   *llm.Client
 	emb   *llm.Embedder
 	data  *data.Store
@@ -37,8 +39,8 @@ type Server struct {
 }
 
 // New 构造路由。
-func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Store, db *store.Store, bl *blob.Client, q *queue.Queue) *gin.Engine {
-	s := &Server{cfg: cfg, llm: client, emb: emb, data: st, db: db, blob: bl, queue: q}
+func New(cfg config.Config, gw *gateway.Gateway, client *llm.Client, emb *llm.Embedder, st *data.Store, db *store.Store, bl *blob.Client, q *queue.Queue) *gin.Engine {
+	s := &Server{cfg: cfg, gw: gw, llm: client, emb: emb, data: st, db: db, blob: bl, queue: q}
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
@@ -52,6 +54,7 @@ func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Stor
 	r.GET("/api/meta/pages", s.pagesMeta)
 	r.GET("/api/usage/summary", s.usageSummary)
 	r.GET("/api/observability/series", s.observability)
+	r.GET("/api/gateway/status", s.gatewayStatus)
 
 	// 会话（持久化）
 	r.GET("/api/conversations", s.listConversations)
@@ -87,7 +90,7 @@ func (s *Server) healthz(c *gin.Context) {
 func (s *Server) readyz(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
-	if err := s.llm.Healthy(ctx); err != nil {
+	if err := s.gw.Healthy(ctx); err != nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "unavailable", "ollama": err.Error()})
 		return
 	}
