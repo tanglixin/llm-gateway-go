@@ -62,7 +62,7 @@ func Seed(ctx context.Context, st *store.Store, emb *llm.Embedder, tenant string
 		return err
 	}
 	if n > 0 {
-		return nil
+		return st.NormalizeReadyDocuments(ctx, tenant)
 	}
 
 	total := 0
@@ -73,7 +73,7 @@ func Seed(ctx context.Context, st *store.Store, emb *llm.Embedder, tenant string
 		}
 
 		items := make([]store.ChunkInput, 0, 8)
-		for i, para := range chunks(d.body) {
+		for i, para := range Chunks(d.body) {
 			vec, err := emb.Embed(ctx, para)
 			if err != nil {
 				return err
@@ -88,6 +88,9 @@ func Seed(ctx context.Context, st *store.Store, emb *llm.Embedder, tenant string
 		if err := st.InsertChunks(ctx, docID, tenant, items); err != nil {
 			return err
 		}
+		if err := st.SetDocumentStage(ctx, docID, 5, "ready", ""); err != nil {
+			return err
+		}
 		total += len(items)
 	}
 
@@ -95,8 +98,8 @@ func Seed(ctx context.Context, st *store.Store, emb *llm.Embedder, tenant string
 	return nil
 }
 
-// chunks 按段落切分，过短的段落合并到上一块。
-func chunks(body string) []string {
+// Chunks 按段落切分，过短的段落合并到上一块。
+func Chunks(body string) []string {
 	var out []string
 	var buf strings.Builder
 

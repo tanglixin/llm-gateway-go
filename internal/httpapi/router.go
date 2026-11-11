@@ -11,24 +11,28 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/llm-gateway/llm-gateway/internal/blob"
 	"github.com/llm-gateway/llm-gateway/internal/config"
 	"github.com/llm-gateway/llm-gateway/internal/data"
 	"github.com/llm-gateway/llm-gateway/internal/llm"
+	"github.com/llm-gateway/llm-gateway/internal/queue"
 	"github.com/llm-gateway/llm-gateway/internal/store"
 )
 
 // Server 聚合 handler 依赖。
 type Server struct {
-	cfg  config.Config
-	llm  *llm.Client
-	emb  *llm.Embedder
-	data *data.Store
-	db   *store.Store
+	cfg   config.Config
+	llm   *llm.Client
+	emb   *llm.Embedder
+	data  *data.Store
+	db    *store.Store
+	blob  *blob.Client
+	queue *queue.Queue
 }
 
 // New 构造路由。
-func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Store, db *store.Store) *gin.Engine {
-	s := &Server{cfg: cfg, llm: client, emb: emb, data: st, db: db}
+func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Store, db *store.Store, bl *blob.Client, q *queue.Queue) *gin.Engine {
+	s := &Server{cfg: cfg, llm: client, emb: emb, data: st, db: db, blob: bl, queue: q}
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
@@ -50,7 +54,9 @@ func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Stor
 
 	// 动作类
 	r.POST("/api/chat", s.chat)
+	r.GET("/api/documents", s.listDocuments)
 	r.POST("/api/documents", s.uploadDocument)
+	r.GET("/api/documents/:id", s.getDocument)
 	r.POST("/api/documents/:id/retry", s.retryDocument)
 	r.POST("/api/retrieval/search", s.retrievalSearch)
 	r.POST("/api/agent/run", s.agentRun)

@@ -177,6 +177,31 @@ llm-gateway_ollamadata
 
 `make down` 只停容器、保留数据；`down -v` 才会连数据一起删。
 
+### 文档 ETL
+
+上传 → 存原件 → 入队 → 五阶段处理，全程可查询进度：
+
+```bash
+# 上传（multipart，也支持 JSON {name, content}）
+curl -s -X POST localhost:8080/api/documents -F "file=@食堂管理规定.md"
+curl -s localhost:8080/api/documents          # 列表 + queueDepth
+curl -s localhost:8080/api/documents/<id>     # 单条，前端轮询用
+curl -s -X POST localhost:8080/api/documents/<id>/retry
+```
+
+| 阶段 | 名称 | 做什么 |
+| --- | --- | --- |
+| 1 | 解析 | PDF 抽文本（`ledongthuc/pdf`）、md/txt 直接读 |
+| 2 | 切分 | 按段落，超过 300 字切开，过短合并 |
+| 3 | 向量化 | `nomic-embed-text` 768 维 |
+| 4 | 入库 | 写 `chunks`，重建该文档的分块 |
+| 5 | 就绪 | 可被检索与引用 |
+
+- 原件存 MinIO：`<tenant>/<时间戳>-<文件名>`
+- 任务走 Redis list `etl:jobs`（RPUSH + BLPOP），worker 在进程内跑
+- 失败会写 `documents.error`，前端显示「解析失败」并可重试
+- `.docx` 暂不支持（提示先转 PDF/Markdown）
+
 ### 向量检索
 
 文档 → 分块 → embedding（`nomic-embed-text`，768 维）→ pgvector，检索走余弦距离：

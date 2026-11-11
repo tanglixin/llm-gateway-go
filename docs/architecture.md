@@ -76,6 +76,21 @@
 - **Ollama 返回 NDJSON**：每行一个 JSON，必须逐行解析。多行 pretty-print 的 JSON
   会被 `bufio.Scanner` 拆碎，第一行 `{` 直接解析失败——写 mock 时踩过。
 
+## 文档 ETL
+
+```
+POST /api/documents → MinIO(原件) → documents 行(status=uploaded) → RPUSH etl:jobs
+                                                                        │
+   worker: BLPOP ──▶ 解析 ──▶ 切分 ──▶ 向量化 ──▶ 写 chunks ──▶ status=ready
+                       │        │         │           │
+                     stage=1  stage=2   stage=3     stage=4
+```
+
+- **状态落在数据库里**，不是内存：worker 崩了重启也不会丢进度
+- **失败可重试**：`stage`/`status`/`error` 三列记录，`POST /retry` 重置后重新入队
+- **替旧重来**：重试时先 `DELETE FROM chunks WHERE document_id = ...` 再插入，不会留下旧分块
+- **队列用 Redis list** 而不是 Asynq：够用、零额外依赖，`BLPOP` 天然阻塞
+
 ## 向量检索（RAG）
 
 ```
@@ -151,8 +166,8 @@ main.ts
 ## 为什么是这些组件
 
 - **pgvector**：文档向量和业务数据同库，省一套向量数据库，事务内可查。
-- **Redis**：预留给 ETL 任务队列（Asynq）与语义缓存，都是短生命周期数据。
-- **MinIO**：S3 兼容，本地开发等同云上对象存储，存原始文档与解析中间产物。
+- **Redis**：ETL 任务队列（list + BLPOP），后续可加语义缓存。
+- **MinIO**：S3 兼容，存文档原件；线上换成 OSS/S3 只改 endpoint。
 - **Ollama**：本地推理，断网可跑；线上可换任意 OpenAI 兼容端点。
 
 ## 已知取舍
@@ -164,12 +179,13 @@ main.ts
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |
 | 多租户 | `tenant_id` 恒为 `default` | 没有鉴权，任何人都是同一租户 |
-| 动作接口 | 返回模拟结果 | 上传/评测/备份尚未真正执行 |
+| 文档格式 | `md/txt/pdf` | `.docx` 需先转换；扫描件 PDF 无文本层会失败 |
+| 动作接口 | 评测/备份仍返回模拟结果 | 上传与 ETL 已是真实实现 |
 
 ## 下一步
 
 - [x] `/api/chat` 改 SSE：首个 token 就渲染
-- [ ] 文档接入 MinIO + Redis 队列：ETL 五阶段
+- [x] 文档接入 MinIO + Redis 队列：ETL 五阶段
 - [x] pgvector 检索：余弦相似度 + HNSW
 - [ ] 混合检索（BM25 + 向量）与 rerank
 - [ ] 看板数据从内存种子换成真实查询（usage / trace / eval）

@@ -42,8 +42,10 @@
 | GET | `/api/conversations/{id}` | — | 会话 + 全部消息 |
 | PATCH | `/api/conversations/{id}` | `{title}` | 改名 |
 | DELETE | `/api/conversations/{id}` | — | 删除（消息级联） |
-| POST | `/api/documents` | `{name}` | 模拟上传，返回新文档 `{id,...}` |
-| POST | `/api/documents/{id}/retry` | — | 重试解析，返回更新后的文档 |
+| GET | `/api/documents` | — | 文档列表 + `queueDepth` |
+| POST | `/api/documents` | multipart `file` 或 `{name, content}` | ✅ 存 MinIO + 入队，返回文档 |
+| GET | `/api/documents/{id}` | — | 单条（轮询 ETL 进度） |
+| POST | `/api/documents/{id}/retry` | — | ✅ 重置阶段并重新入队 |
 | POST | `/api/retrieval/search` | `{query, topK}` | ✅ pgvector 余弦检索，返回 `{hits, tookMs, embedModel}` |
 | POST | `/api/agent/run` | `{task}` | 返回 ReAct 步骤数组 |
 | POST | `/api/gateway/drill` | `{enable}` | 故障演练开关 |

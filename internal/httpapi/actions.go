@@ -44,43 +44,6 @@ var pages = []pageMeta{
 	{"design", "信息架构与设计规范", []string{"FR-18"}, "W3", "交付说明"},
 }
 
-// uploadDocument 模拟上传：新文档从「已上传」阶段开始。
-func (s *Server) uploadDocument(c *gin.Context) {
-	var in struct {
-		Name string `json:"name"`
-	}
-	_ = c.ShouldBindJSON(&in)
-	name := in.Name
-	if name == "" {
-		name = fmt.Sprintf("upload_%d.pdf", time.Now().Unix())
-	}
-
-	doc := map[string]any{
-		"id":     fmt.Sprintf("doc_%d", time.Now().UnixNano()),
-		"n":      name,
-		"t":      "Acme 研发中心",
-		"s":      "1.0 MB",
-		"chunks": 0,
-		"st":     "解析中",
-		"stage":  1,
-		"idx":    "idx_20261109_01",
-		"acl":    "全员可见",
-	}
-	s.data.AddDocument(doc)
-	c.JSON(http.StatusCreated, doc)
-}
-
-// retryDocument 重试失败解析。
-func (s *Server) retryDocument(c *gin.Context) {
-	id := c.Param("id")
-	doc, ok := s.data.RetryDocument(id)
-	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "not_found", "message": "document not found"}})
-		return
-	}
-	c.JSON(http.StatusOK, doc)
-}
-
 // Cite 是一条引用。
 type Cite struct {
 	N       int     `json:"n"`
