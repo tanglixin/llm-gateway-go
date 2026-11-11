@@ -25,6 +25,7 @@ type Config struct {
 	PostgresDSN    string
 	Tenant         string
 	Providers      []ProviderConfig
+	JWTSecret      string
 	RedisAddr      string
 	MinioEndpoint  string
 	MinioAccessKey string
@@ -40,8 +41,9 @@ func Load() Config {
 		OllamaModel:    env("OLLAMA_MODEL", "qwen2:0.5b"),
 		OllamaEmbed:    env("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
 		PostgresDSN:    env("POSTGRES_DSN", "postgres://llm:llm@127.0.0.1:5432/llm?sslmode=disable"),
-		Tenant:         env("NOVA_TENANT", "default"),
+		Tenant:         env("NOVA_TENANT", "acme-rd"),
 		Providers:      loadProviders(),
+		JWTSecret:      env("JWT_SECRET", "dev-only-change-me"),
 		RedisAddr:      env("REDIS_ADDR", "127.0.0.1:6379"),
 		MinioEndpoint:  env("MINIO_ENDPOINT", "127.0.0.1:9000"),
 		MinioAccessKey: env("MINIO_ROOT_USER", "minioadmin"),

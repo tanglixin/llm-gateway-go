@@ -63,14 +63,14 @@ func (s *Server) uploadDocument(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
-	key := fmt.Sprintf("%s/%d-%s", s.cfg.Tenant, time.Now().UnixNano(), sanitize(name))
+	key := fmt.Sprintf("%s/%d-%s", s.tenantOf(c), time.Now().UnixNano(), sanitize(name))
 
 	if err := s.blob.Put(ctx, key, data, contentTypeOf(name)); err != nil {
 		s.fail(c, err)
 		return
 	}
 
-	doc, err := s.db.CreateDocument(ctx, s.cfg.Tenant, name, acl, key, int64(len(data)))
+	doc, err := s.db.CreateDocument(ctx, s.tenantOf(c), name, acl, key, int64(len(data)))
 	if err != nil {
 		s.fail(c, err)
 		return
@@ -86,7 +86,7 @@ func (s *Server) uploadDocument(c *gin.Context) {
 
 // listDocuments 返回所有文档及 ETL 阶段。
 func (s *Server) listDocuments(c *gin.Context) {
-	docs, err := s.db.ListDocuments(c.Request.Context(), s.cfg.Tenant)
+	docs, err := s.db.ListDocuments(c.Request.Context(), s.tenantOf(c))
 	if err != nil {
 		s.fail(c, err)
 		return
@@ -101,7 +101,7 @@ func (s *Server) getDocument(c *gin.Context) {
 	if !ok {
 		return
 	}
-	doc, err := s.db.GetDocument(c.Request.Context(), id)
+	doc, err := s.db.GetDocument(c.Request.Context(), id, s.tenantOf(c))
 	if err != nil {
 		s.fail(c, err)
 		return
@@ -115,7 +115,7 @@ func (s *Server) retryDocument(c *gin.Context) {
 	if !ok {
 		return
 	}
-	doc, err := s.db.GetDocument(c.Request.Context(), id)
+	doc, err := s.db.GetDocument(c.Request.Context(), id, s.tenantOf(c))
 	if err != nil {
 		s.fail(c, err)
 		return

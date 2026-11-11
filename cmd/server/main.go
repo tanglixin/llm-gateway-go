@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/llm-gateway/llm-gateway/internal/auth"
 	"github.com/llm-gateway/llm-gateway/internal/blob"
 	"github.com/llm-gateway/llm-gateway/internal/config"
 	"github.com/llm-gateway/llm-gateway/internal/data"
@@ -22,6 +23,7 @@ import (
 	"github.com/llm-gateway/llm-gateway/internal/llm"
 	"github.com/llm-gateway/llm-gateway/internal/queue"
 	"github.com/llm-gateway/llm-gateway/internal/store"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func main() {
@@ -55,13 +57,16 @@ func run() error {
 	if err := db.Migrate(context.Background()); err != nil {
 		return err
 	}
+	if err := seedUsers(context.Background(), db, log); err != nil {
+		return err
+	}
 	log.Info("postgres ready", "dsn", cfg.PostgresDSN)
 
 	emb, err := llm.NewEmbedder(cfg.OllamaBaseURL, cfg.OllamaEmbed)
 	if err != nil {
 		return err
 	}
-	if err := kb.Seed(context.Background(), db, emb, cfg.Tenant); err != nil {
+	if err := kb.Seed(context.Background(), db, emb, demoTenant); err != nil {
 		log.Warn("knowledge base seed failed", "error", err)
 	}
 
@@ -90,7 +95,7 @@ func run() error {
 
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.New(cfg, gw, client, emb, data.New(), db, bl, q),
+		Handler:           httpapi.New(cfg, auth.NewManager(cfg.JWTSecret, 12*time.Hour), gw, client, emb, data.New(), db, bl, q),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -140,4 +145,38 @@ func buildGateway(cfg config.Config) (*gateway.Gateway, error) {
 		return nil, fmt.Errorf("no providers configured")
 	}
 	return gateway.New(providers), nil
+}
+
+// demoTenant 是演示数据的归属租户，与种子用户一致。
+const demoTenant = "acme-rd"
+
+// seedUsers 首次启动时写入演示账号（两个租户，用于验证隔离）。
+func seedUsers(ctx context.Context, db *store.Store, log *slog.Logger) error {
+	n, err := db.CountUsers(ctx)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+
+	seeds := []struct {
+		email, name, tenant, role, password string
+	}{
+		{"tang@acme.dev", "唐立新", "acme-rd", "admin", "gateway"},
+		{"demo@acme.dev", "演示用户", "demo-guest", "member", "gateway"},
+	}
+	for _, s := range seeds {
+		hash, err := bcrypt.GenerateFromPassword([]byte(s.password), bcrypt.DefaultCost)
+		if err != nil {
+			return err
+		}
+		if err := db.CreateUser(ctx, store.User{
+			Email: s.email, Name: s.name, Tenant: s.tenant, Role: s.role, PasswordHash: string(hash),
+		}); err != nil {
+			return err
+		}
+	}
+	log.Info("seeded demo users", "count", len(seeds), "password", "gateway")
+	return nil
 }

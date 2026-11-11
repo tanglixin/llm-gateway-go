@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/llm-gateway/llm-gateway/internal/auth"
 	"github.com/llm-gateway/llm-gateway/internal/blob"
 	"github.com/llm-gateway/llm-gateway/internal/config"
 	"github.com/llm-gateway/llm-gateway/internal/data"
@@ -25,6 +26,7 @@ import (
 // Server 聚合 handler 依赖。
 type Server struct {
 	cfg   config.Config
+	jwt   *auth.Manager
 	gw    *gateway.Gateway
 	llm   *llm.Client
 	emb   *llm.Embedder
@@ -39,44 +41,48 @@ type Server struct {
 }
 
 // New 构造路由。
-func New(cfg config.Config, gw *gateway.Gateway, client *llm.Client, emb *llm.Embedder, st *data.Store, db *store.Store, bl *blob.Client, q *queue.Queue) *gin.Engine {
-	s := &Server{cfg: cfg, gw: gw, llm: client, emb: emb, data: st, db: db, blob: bl, queue: q}
+func New(cfg config.Config, jwtMgr *auth.Manager, gw *gateway.Gateway, client *llm.Client, emb *llm.Embedder, st *data.Store, db *store.Store, bl *blob.Client, q *queue.Queue) *gin.Engine {
+	s := &Server{cfg: cfg, jwt: jwtMgr, gw: gw, llm: client, emb: emb, data: st, db: db, blob: bl, queue: q}
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 
+	// /api/* 需要登录；健康检查与登录本身公开
+	api := r.Group("/api", s.jwt.Middleware())
+
 	r.GET("/healthz", s.healthz)
 	r.GET("/readyz", s.readyz)
-	r.GET("/api/version", s.version)
+	r.POST("/api/auth/login", s.login)
 
 	// 12 个页面的初始数据
-	r.GET("/api/bootstrap", s.bootstrap)
-	r.GET("/api/meta/pages", s.pagesMeta)
-	r.GET("/api/usage/summary", s.usageSummary)
-	r.GET("/api/observability/series", s.observability)
-	r.GET("/api/gateway/status", s.gatewayStatus)
+	api.GET("/auth/me", s.me)
+	api.GET("/bootstrap", s.bootstrap)
+	api.GET("/meta/pages", s.pagesMeta)
+	api.GET("/usage/summary", s.usageSummary)
+	api.GET("/observability/series", s.observability)
+	api.GET("/gateway/status", s.gatewayStatus)
 
 	// 会话（持久化）
-	r.GET("/api/conversations", s.listConversations)
-	r.POST("/api/conversations", s.createConversation)
-	r.GET("/api/conversations/:id", s.getConversation)
-	r.PATCH("/api/conversations/:id", s.renameConversation)
-	r.DELETE("/api/conversations/:id", s.deleteConversation)
+	api.GET("/conversations", s.listConversations)
+	api.POST("/conversations", s.createConversation)
+	api.GET("/conversations/:id", s.getConversation)
+	api.PATCH("/conversations/:id", s.renameConversation)
+	api.DELETE("/conversations/:id", s.deleteConversation)
 
 	// 动作类
-	r.POST("/api/chat", s.chat)
-	r.GET("/api/documents", s.listDocuments)
-	r.POST("/api/documents", s.uploadDocument)
-	r.GET("/api/documents/:id", s.getDocument)
-	r.POST("/api/documents/:id/retry", s.retryDocument)
-	r.POST("/api/retrieval/search", s.retrievalSearch)
-	r.POST("/api/retrieval/evaluate", s.retrievalEvaluate)
-	r.POST("/api/agent/run", s.agentRun)
-	r.POST("/api/gateway/drill", s.gatewayDrill)
-	r.POST("/api/eval/run", s.evalRun)
-	r.POST("/api/ops/backup", s.opsBackup)
-	r.POST("/api/ops/restore", s.opsRestore)
-	r.PATCH("/api/ops/checklist/:id", s.opsChecklist)
+	api.POST("/chat", s.chat)
+	api.GET("/documents", s.listDocuments)
+	api.POST("/documents", s.uploadDocument)
+	api.GET("/documents/:id", s.getDocument)
+	api.POST("/documents/:id/retry", s.retryDocument)
+	api.POST("/retrieval/search", s.retrievalSearch)
+	api.POST("/retrieval/evaluate", s.retrievalEvaluate)
+	api.POST("/agent/run", s.agentRun)
+	api.POST("/gateway/drill", s.gatewayDrill)
+	api.POST("/eval/run", s.evalRun)
+	api.POST("/ops/backup", s.opsBackup)
+	api.POST("/ops/restore", s.opsRestore)
+	api.PATCH("/ops/checklist/:id", s.opsChecklist)
 
 	// 前端静态资源 + SPA 兜底
 	r.NoRoute(s.serveWeb)
@@ -135,4 +141,12 @@ func (s *Server) serveWeb(c *gin.Context) {
 		return
 	}
 	c.File("web/index.html")
+}
+
+// tenantOf 从 token 里取租户；没有身份时回落到默认租户（仅用于公开接口）。
+func (s *Server) tenantOf(c *gin.Context) string {
+	if t, ok := auth.TenantFrom(c.Request.Context()); ok {
+		return t
+	}
+	return s.cfg.Tenant
 }

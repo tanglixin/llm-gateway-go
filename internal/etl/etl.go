@@ -74,7 +74,7 @@ func (w *Worker) Run(ctx context.Context) {
 
 // Process 处理一个文档。
 func (w *Worker) Process(ctx context.Context, docID string) error {
-	doc, err := w.st.GetDocument(ctx, docID)
+	doc, err := w.st.GetDocument(ctx, docID, "")
 	if err != nil {
 		return fmt.Errorf("load document: %w", err)
 	}

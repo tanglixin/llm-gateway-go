@@ -65,9 +65,15 @@ func (s *Store) ListDocuments(ctx context.Context, tenant string) ([]Document, e
 	return out, rows.Err()
 }
 
-// GetDocument 取单条。
-func (s *Store) GetDocument(ctx context.Context, id string) (*Document, error) {
-	d, err := scanDoc(s.pool.QueryRow(ctx, `SELECT `+docCols+` FROM documents WHERE id = $1::uuid`, id))
+// GetDocument 取单条；tenant 为空表示不限制（ETL 内部调用）。
+func (s *Store) GetDocument(ctx context.Context, id, tenant string) (*Document, error) {
+	sql := `SELECT ` + docCols + ` FROM documents WHERE id = $1::uuid`
+	args := []any{id}
+	if tenant != "" {
+		sql += ` AND tenant_id = $2`
+		args = append(args, tenant)
+	}
+	d, err := scanDoc(s.pool.QueryRow(ctx, sql, args...))
 	if err != nil {
 		if err.Error() == "no rows in result set" {
 			return nil, ErrNotFound

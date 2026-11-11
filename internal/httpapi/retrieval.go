@@ -12,8 +12,8 @@ import (
 )
 
 // bm25Index 返回当前语料的 BM25 索引；分块数变化时自动重建。
-func (s *Server) bm25Index(ctx context.Context) (*search.Index, error) {
-	chunks, err := s.db.AllChunks(ctx, s.cfg.Tenant)
+func (s *Server) bm25Index(ctx context.Context, tenant string) (*search.Index, error) {
+	chunks, err := s.db.AllChunks(ctx, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -32,8 +32,8 @@ func (s *Server) bm25Index(ctx context.Context) (*search.Index, error) {
 }
 
 // searchAll 按模式检索，返回统一结构。
-func (s *Server) searchAll(ctx context.Context, query, mode string, topK int, alpha float64) ([]search.Hit, error) {
-	ix, err := s.bm25Index(ctx)
+func (s *Server) searchAll(ctx context.Context, tenant, query, mode string, topK int, alpha float64) ([]search.Hit, error) {
+	ix, err := s.bm25Index(ctx, tenant)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +51,7 @@ func (s *Server) searchAll(ctx context.Context, query, mode string, topK int, al
 		if err != nil {
 			return nil, err
 		}
-		chunks, err := s.db.SearchChunks(ctx, s.cfg.Tenant, vec, topK)
+		chunks, err := s.db.SearchChunks(ctx, tenant, vec, topK)
 		if err != nil {
 			return nil, err
 		}
@@ -72,7 +72,7 @@ func (s *Server) searchAll(ctx context.Context, query, mode string, topK int, al
 		if err != nil {
 			return nil, err
 		}
-		chunks, err := s.db.SearchChunks(ctx, s.cfg.Tenant, vec, 20)
+		chunks, err := s.db.SearchChunks(ctx, tenant, vec, 20)
 		if err != nil {
 			return nil, err
 		}
@@ -107,7 +107,7 @@ func (s *Server) retrievalEvaluate(c *gin.Context) {
 	type pair struct{ lexical, semantic []search.Hit }
 	perQuery := make([]pair, 0, len(cases))
 
-	ix, err := s.bm25Index(c.Request.Context())
+	ix, err := s.bm25Index(c.Request.Context(), s.tenantOf(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": err.Error()}})
 		return
@@ -124,7 +124,7 @@ func (s *Server) retrievalEvaluate(c *gin.Context) {
 		embedTotal += time.Since(t0).Milliseconds()
 
 		lexical := ix.Search(gc.Query, 20)
-		chunks, err := s.db.SearchChunks(c.Request.Context(), s.cfg.Tenant, vec, 20)
+		chunks, err := s.db.SearchChunks(c.Request.Context(), s.tenantOf(c), vec, 20)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"message": err.Error()}})
 			return

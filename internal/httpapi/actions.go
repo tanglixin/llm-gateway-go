@@ -75,7 +75,7 @@ func (s *Server) retrievalSearch(c *gin.Context) {
 	}
 
 	start := time.Now()
-	hits, err := s.searchAll(c.Request.Context(), in.Query, in.Mode, in.TopK, alpha)
+	hits, err := s.searchAll(c.Request.Context(), s.tenantOf(c), in.Query, in.Mode, in.TopK, alpha)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "search_error", "message": err.Error()}})
 		return
@@ -92,12 +92,12 @@ func (s *Server) retrievalSearch(c *gin.Context) {
 }
 
 // retrieve 供 RAG 用：取 top-k 片段并拼成上下文。
-func (s *Server) retrieve(ctx context.Context, query string, k int) ([]Cite, string) {
+func (s *Server) retrieve(ctx context.Context, tenant, query string, k int) ([]Cite, string) {
 	vec, err := s.emb.Embed(ctx, query)
 	if err != nil {
 		return nil, ""
 	}
-	hits, err := s.db.SearchChunks(ctx, s.cfg.Tenant, vec, k)
+	hits, err := s.db.SearchChunks(ctx, tenant, vec, k)
 	if err != nil {
 		return nil, ""
 	}

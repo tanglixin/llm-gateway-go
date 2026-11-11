@@ -66,9 +66,15 @@ func (s *Store) ListConversations(ctx context.Context, tenant string) ([]Convers
 	return out, rows.Err()
 }
 
-// GetConversation 取会话及其消息。
-func (s *Store) GetConversation(ctx context.Context, id string) (*Conversation, error) {
-	c, err := scanConv(s.pool.QueryRow(ctx, `SELECT `+convCols+` FROM conversations WHERE id = $1::uuid`, id))
+// GetConversation 取会话及其消息，tenant 为空表示不限制（内部调用）。
+func (s *Store) GetConversation(ctx context.Context, id, tenant string) (*Conversation, error) {
+	sql := `SELECT ` + convCols + ` FROM conversations WHERE id = $1::uuid`
+	args := []any{id}
+	if tenant != "" {
+		sql += ` AND tenant_id = $2`
+		args = append(args, tenant)
+	}
+	c, err := scanConv(s.pool.QueryRow(ctx, sql, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -147,8 +153,10 @@ func (s *Store) AppendMessage(ctx context.Context, convID string, m Message) (*M
 }
 
 // RenameConversation 改名。
-func (s *Store) RenameConversation(ctx context.Context, id, title string) error {
-	tag, err := s.pool.Exec(ctx, `UPDATE conversations SET title = $2, updated_at = now() WHERE id = $1::uuid`, id, title)
+func (s *Store) RenameConversation(ctx context.Context, id, tenant, title string) error {
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE conversations SET title = $3, updated_at = now() WHERE id = $1::uuid AND tenant_id = $2`,
+		id, tenant, title)
 	if err != nil {
 		return err
 	}
@@ -159,8 +167,8 @@ func (s *Store) RenameConversation(ctx context.Context, id, title string) error 
 }
 
 // DeleteConversation 删除会话（消息级联）。
-func (s *Store) DeleteConversation(ctx context.Context, id string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM conversations WHERE id = $1::uuid`, id)
+func (s *Store) DeleteConversation(ctx context.Context, id, tenant string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM conversations WHERE id = $1::uuid AND tenant_id = $2`, id, tenant)
 	if err != nil {
 		return err
 	}

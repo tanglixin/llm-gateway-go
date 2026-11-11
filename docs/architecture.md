@@ -92,6 +92,20 @@ GROUP BY to_char(created_at,'MM-DD') → 近 7 天
 - **成本公式只有一处**：`store.cost()`，前端只是展示
 - 注意 `avg()` / `percentile_cont()` 返回 numeric，扫进 `int64` 会报错，必须 `::bigint`
 
+## 鉴权与租户隔离
+
+```
+POST /api/auth/login → bcrypt 校验 → 签发 JWT（HS256, 12h）
+后续请求 → middleware 校验 → claims 放进 context
+handler → s.tenantOf(c) 取租户 → 所有 SQL 带 tenant_id 过滤
+```
+
+- **租户来自 token，不来自请求参数**：客户端无法通过改参数越权
+- **按 ID 的操作全部带租户**：`WHERE id = $1 AND tenant_id = $2`，
+  查不到统一 404，不区分「不存在」和「不属于你」
+- **chat 也校验会话归属**：否则可以往别人会话里追加消息
+- **内部调用传空租户**：ETL 按 id 取文档时不需要租户限制
+
 ## AI 网关
 
 ```
@@ -243,6 +257,8 @@ main.ts
 | 看板数据 | 总览/成本/检索/可观测已接真实聚合；评测与安全仍是种子 | 剩余页面结构已定型，换 SQL 即可 |
 | Trace | 回放页是示例 span | 真实链路要接 OTel SDK + collector |
 | 网关熔断状态 | 只在内存 | 重启清零，多实例之间不同步 |
+| 鉴权 | HS256 + 单密钥 | 无刷新 token、无吊销；多实例需共享 JWT_SECRET |
+| 行级隔离 | 应用层 WHERE | 没开 Postgres RLS，直接连库仍可绕过 |
 | 检索策略 | BM25 + 向量 + 加权分数融合 | 混合与纯 BM25 持平，语料小时难以拉开差距 |
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |

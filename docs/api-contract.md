@@ -55,6 +55,15 @@
 | POST | `/api/ops/restore` | `{backupId}` | 恢复演练 |
 | PATCH | `/api/ops/checklist/{id}` | `{done}` | 勾选检查项 |
 
+## 二·五、鉴权
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| POST | `/api/auth/login` | `{email,password}` → `{token,expiresAt,user}`，**公开** |
+| GET | `/api/auth/me` | 当前身份，需 token |
+
+其余 `/api/*` 都需要 `Authorization: Bearer <token>`，否则 401。
+
 ## 三、探针与元信息
 
 | 方法 | 路径 | 说明 |

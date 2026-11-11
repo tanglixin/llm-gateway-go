@@ -18,7 +18,7 @@ import (
 var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 func (s *Server) listConversations(c *gin.Context) {
-	list, err := s.db.ListConversations(c.Request.Context(), s.cfg.Tenant)
+	list, err := s.db.ListConversations(c.Request.Context(), s.tenantOf(c))
 	if err != nil {
 		s.fail(c, err)
 		return
@@ -36,7 +36,7 @@ func (s *Server) createConversation(c *gin.Context) {
 	if model == "" {
 		model = s.llm.Model()
 	}
-	conv, err := s.db.CreateConversation(c.Request.Context(), s.cfg.Tenant, in.Title, model)
+	conv, err := s.db.CreateConversation(c.Request.Context(), s.tenantOf(c), in.Title, model)
 	if err != nil {
 		s.fail(c, err)
 		return
@@ -49,7 +49,7 @@ func (s *Server) getConversation(c *gin.Context) {
 	if !ok {
 		return
 	}
-	conv, err := s.db.GetConversation(c.Request.Context(), id)
+	conv, err := s.db.GetConversation(c.Request.Context(), id, s.tenantOf(c))
 	if err != nil {
 		s.fail(c, err)
 		return
@@ -73,7 +73,7 @@ func (s *Server) renameConversation(c *gin.Context) {
 	if r := []rune(title); len(r) > 40 {
 		title = string(r[:40])
 	}
-	if err := s.db.RenameConversation(c.Request.Context(), id, title); err != nil {
+	if err := s.db.RenameConversation(c.Request.Context(), id, s.tenantOf(c), title); err != nil {
 		s.fail(c, err)
 		return
 	}
@@ -85,7 +85,7 @@ func (s *Server) deleteConversation(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := s.db.DeleteConversation(c.Request.Context(), id); err != nil {
+	if err := s.db.DeleteConversation(c.Request.Context(), id, s.tenantOf(c)); err != nil {
 		s.fail(c, err)
 		return
 	}
@@ -107,12 +107,16 @@ func (s *Server) chat(c *gin.Context) {
 
 	convID := in.ConversationID
 	if convID == "" {
-		conv, err := s.db.CreateConversation(c.Request.Context(), s.cfg.Tenant, "", s.llm.Model())
+		conv, err := s.db.CreateConversation(c.Request.Context(), s.tenantOf(c), "", s.gw.PrimaryModel())
 		if err != nil {
 			s.fail(c, err)
 			return
 		}
 		convID = conv.ID
+	} else if _, err := s.db.GetConversation(c.Request.Context(), convID, s.tenantOf(c)); err != nil {
+		// 不属于当前租户的会话一律当作不存在，不泄露 id 是否有效
+		c.JSON(http.StatusNotFound, gin.H{"error": gin.H{"code": "not_found", "message": "conversation not found"}})
+		return
 	}
 
 	if in.Stream {
@@ -138,7 +142,7 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 	}
 
 	// RAG：先检索，把片段拼进提示词
-	cites, ctxText := s.retrieve(ctx, prompt, 3)
+	cites, ctxText := s.retrieve(ctx, s.tenantOf(c), prompt, 3)
 
 	start := time.Now()
 	answer, usage, provider, err := s.gw.Generate(ctx, buildRAGPrompt(cites, ctxText, prompt))
@@ -197,7 +201,7 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	c.Writer.WriteHeader(http.StatusOK)
 	c.Writer.Flush()
 
-	cites, ctxText := s.retrieve(ctx, prompt, 3)
+	cites, ctxText := s.retrieve(ctx, s.tenantOf(c), prompt, 3)
 
 	start := time.Now()
 	var firstToken time.Duration

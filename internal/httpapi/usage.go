@@ -15,15 +15,15 @@ func (s *Server) usageSummary(c *gin.Context) {
 		since = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	}
 
-	sum, err := s.db.Usage(c.Request.Context(), s.cfg.Tenant, since)
+	sum, err := s.db.Usage(c.Request.Context(), s.tenantOf(c), since)
 	if err != nil {
 		s.fail(c, err)
 		return
 	}
 
 	// 顺带把知识库规模带上，总览页要用
-	docs, _ := s.db.CountDocuments(c.Request.Context(), s.cfg.Tenant)
-	chunks, _ := s.db.AllChunks(c.Request.Context(), s.cfg.Tenant)
+	docs, _ := s.db.CountDocuments(c.Request.Context(), s.tenantOf(c))
+	chunks, _ := s.db.AllChunks(c.Request.Context(), s.tenantOf(c))
 
 	c.JSON(http.StatusOK, gin.H{
 		"summary":   sum,

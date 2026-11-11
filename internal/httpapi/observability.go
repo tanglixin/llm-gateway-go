@@ -14,12 +14,12 @@ func (s *Server) observability(c *gin.Context) {
 		minutes = 60
 	}
 
-	series, err := s.db.Series(c.Request.Context(), s.cfg.Tenant, minutes)
+	series, err := s.db.Series(c.Request.Context(), s.tenantOf(c), minutes)
 	if err != nil {
 		s.fail(c, err)
 		return
 	}
-	recent, err := s.db.Recent(c.Request.Context(), s.cfg.Tenant, 10)
+	recent, err := s.db.Recent(c.Request.Context(), s.tenantOf(c), 10)
 	if err != nil {
 		s.fail(c, err)
 		return

@@ -188,6 +188,37 @@ curl -s 'localhost:8080/api/usage/summary?range=all'   # 或 range=today
 
 总览页与成本页的 KPI、成本页的「最近调用」表都来自这个接口，不是样例数字。
 
+### 鉴权与租户隔离
+
+所有 `/api/*`（除登录）都需要 `Authorization: Bearer <token>`。
+
+```bash
+# 登录（两个演示账号，密码都是 gateway）
+curl -s -X POST localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"tang@acme.dev","password":"gateway"}'
+
+TOKEN=...   # 从响应里取
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/conversations
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/auth/me
+```
+
+| 账号 | 租户 | 角色 | 能看到 |
+| --- | --- | --- | --- |
+| `tang@acme.dev` | `acme-rd` | admin | 6 份文档、21 个会话 |
+| `demo@acme.dev` | `demo-guest` | member | 空（只有自己新建的） |
+
+隔离是**应用层**做的：所有按 ID 的操作都带 `AND tenant_id = $n`，
+跨租户一律返回 404（不是 403，避免泄露 id 是否存在）。有回归测试兜底：
+
+```bash
+TEST_POSTGRES_DSN='postgres://llm:llm@127.0.0.1:5432/llm?sslmode=disable' \
+  go test ./internal/store/ -run Isolation -v
+```
+
+> 这个测试是有来历的：第一版只做了列表过滤，`GET /api/conversations/{id}`
+> 竟然能让 demo 租户读到 acme-rd 的会话，`DELETE` 还能删掉。写测试时才发现。
+
 ### AI 网关：多 provider 路由
 
 ```bash
