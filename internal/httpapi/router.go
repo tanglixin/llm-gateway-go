@@ -51,6 +51,7 @@ func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Stor
 	r.GET("/api/bootstrap", s.bootstrap)
 	r.GET("/api/meta/pages", s.pagesMeta)
 	r.GET("/api/usage/summary", s.usageSummary)
+	r.GET("/api/observability/series", s.observability)
 
 	// 会话（持久化）
 	r.GET("/api/conversations", s.listConversations)

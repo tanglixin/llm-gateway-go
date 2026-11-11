@@ -188,6 +188,17 @@ curl -s 'localhost:8080/api/usage/summary?range=all'   # 或 range=today
 
 总览页与成本页的 KPI、成本页的「最近调用」表都来自这个接口，不是样例数字。
 
+### 可观测（真实时间序列）
+
+```bash
+curl -s 'localhost:8080/api/observability/series?minutes=180'
+```
+
+按分钟分桶返回 `requests / avgMs / p95Ms / tokens`，外加最近 10 次调用。
+可观测页的四张图（请求数、平均延迟、P95、Token）都由它渲染。
+
+> Trace 回放页仍是示例数据——真实 span 需要接 OpenTelemetry，那是另一件事。
+
 ### 文档 ETL
 
 上传 → 存原件 → 入队 → 五阶段处理，全程可查询进度：

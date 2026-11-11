@@ -92,6 +92,22 @@ GROUP BY to_char(created_at,'MM-DD') → 近 7 天
 - **成本公式只有一处**：`store.cost()`，前端只是展示
 - 注意 `avg()` / `percentile_cont()` 返回 numeric，扫进 `int64` 会报错，必须 `::bigint`
 
+## 可观测
+
+`GET /api/observability/series?minutes=N` 按分钟分桶：
+
+```sql
+date_trunc('minute', created_at) AS b,
+count(*),
+avg(latency_ms)::bigint,
+percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)::bigint,
+sum(tokens_in + tokens_out)
+GROUP BY b ORDER BY b
+```
+
+时间窗口用 `now() - make_interval(mins => $2)`，不拼接字符串，
+避免 SQL 注入也避免类型转换坑。
+
 ## 文档 ETL
 
 ```
@@ -208,7 +224,8 @@ main.ts
 
 | 项 | 现状 | 影响 |
 | --- | --- | --- |
-| 看板数据 | 总览/成本/检索页已接真实聚合；可观测、评测、安全仍是种子 | 剩余页面结构已定型，换 SQL 即可 |
+| 看板数据 | 总览/成本/检索/可观测已接真实聚合；评测与安全仍是种子 | 剩余页面结构已定型，换 SQL 即可 |
+| Trace | 回放页是示例 span | 真实链路要接 OTel SDK + collector |
 | 检索策略 | BM25 + 向量 + 加权分数融合 | 混合与纯 BM25 持平，语料小时难以拉开差距 |
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |
