@@ -1,4 +1,95 @@
-# llm-gateway
+# LLM Gateway · 企业级 RAG 网关
+
+> 一个能跑起来的完整闭环：**文档进 → 向量检索 → RAG 问答（流式）→ Agent 工具调用 → 可观测与评测**。
+> Go 1.23 + Gin + langchaingo + PostgreSQL(pgvector)，前端 Vue 3 由同一个二进制托管。
+
+不是 demo 页面拼出来的壳子——**每个数字都来自真实请求**：
+
+| 能力 | 实现 | 数据来源 |
+| --- | --- | --- |
+| 混合检索 | BM25 + pgvector 余弦 + 加权融合 | 真实语料 13 个分块 |
+| 文档 ETL | MinIO 存原件 → Redis 队列 → 解析/切分/向量化/入库 | PDF / DOCX / MD / TXT |
+| RAG 问答 | 检索 top-3 拼进提示词，SSE 逐字返回 | 首字约 0.2s |
+| Agent | ReAct 循环 + 5 个真实工具 + 数字溯源校验 | 每次工具调用都落 trace |
+| 多 provider 网关 | 加权轮询 + 熔断 + 故障转移 | 失败自动切换 |
+| 安全 | JWT + 租户隔离（行级过滤）+ RBAC | 越权返回 404 |
+| 可观测 | OpenTelemetry span 写 PostgreSQL | 真实 waterfall |
+| 评测 | 4 个 prompt 版本 × 7 条 Golden Set | Recall 低于 0.80 闸门阻断 |
+
+## 架构
+
+```
+浏览器（Vue 3，由 Go 同源托管，无 CORS）
+    │  JWT
+    ▼
+┌──────────────────────────────────────────────────┐
+│ cmd/server  Gin                                   │
+│  ├─ middleware    auth / RBAC / OTel / 租户        │
+│  ├─ httpapi       chat · conversations · docs      │
+│  │                retrieval · agent · eval · ops   │
+│  ├─ gateway       多 provider 加权路由 + 熔断        │
+│  ├─ agent         ReAct + 5 工具 + 溯源             │
+│  ├─ search        BM25（CJK bigram）+ 分数融合      │
+│  ├─ store         PostgreSQL：会话/文档/span/评测   │
+│  └─ tracing       OTel SDK + 自建 PG exporter      │
+└──────────────────────────────────────────────────┘
+    │              │            │           │
+  PG(pgvector)   Redis       MinIO      Ollama
+```
+
+## 快速开始
+
+```bash
+make up      # 起 PG(pgvector) / Redis / MinIO / Ollama，四个都带健康检查
+make pull    # 拉模型（qwen2:0.5b + nomic-embed-text）
+make run     # 起服务
+open http://127.0.0.1:8080/
+```
+
+首次启动会自动迁移表结构、灌入 3 份示例文档（含向量）、写入演示账号和 4 个 prompt 版本。
+
+**演示账号**（密码都是 `gateway`）：
+
+| 账号 | 租户 | 角色 | 看到 |
+| --- | --- | --- | --- |
+| `tang@acme.dev` | `acme-rd` | admin | 10 份文档、全部功能 |
+| `demo@acme.dev` | `demo-guest` | member | 空租户，管理按钮禁用 |
+
+## 3 分钟能看完什么
+
+完整脚本见 [docs/demo.md](docs/demo.md)。最小路径：
+
+1. **登录** → `tang@acme.dev`，看顶栏的租户与角色
+2. **知识库** → 上传一份 `.md`，看 ETL 五阶段实时跑完（约 2 秒）
+3. **检索调试台** → 同一句话在 BM25 / 向量 / 混合三种模式下对比
+4. **智能问答** → 逐字流式回答 + 可点击的引用卡
+5. **Agent 工作台** → 真实 ReAct：检索 → 调工具 → 终答 + 数字溯源徽标
+6. **可观测** → Trace 瀑布图（真实 span）与审计流水
+
+## 实测数据（本机 Intel Mac，CPU 推理）
+
+```
+问答：首字 212ms，全文 30s（qwen2:0.5b 约 1 token/s）
+检索：BM25 1ms · 向量 2ms · 混合 10ms（不含 embedding 439ms）
+评测：4 个版本跑完 20s，v4 召回 0.714 被闸门阻断
+trace：一次问答 3 个 span，根 span 18574ms 中生成占 16572ms
+```
+
+## 已知取舍
+
+| 项 | 现状 | 原因 |
+| --- | --- | --- |
+| 模型 | qwen2:0.5b | CPU 推理，7B 要等几分钟；Agent 规划因此加了规则兜底 |
+| 评测 | 只算检索指标 | Faithfulness 需要 LLM 打分，慢且不稳，宁可不做 |
+| 部署运维 | backup/restore 是模拟 | 真做要动 `pg_dump`，演示价值低风险高 |
+| 行级隔离 | 应用层 WHERE | 没开 Postgres RLS，直连库可绕过 |
+| 多租户 | tenant_id 从 token 取 | 无刷新 token、无吊销 |
+
+---
+
+# 工程细节
+
+以下是最初的工程笔记，按主题记录，包含踩坑与实现细节。
 
 多模型 LLM 网关：**Go 1.23 + Gin + langchaingo**，本地基础设施用 Docker Compose 一键起。
 
@@ -21,7 +112,7 @@ docs/       架构与运维文档
 > Docker Hub 在本机被 DNS 污染，已在 `~/.docker/daemon.json` 里配置镜像源
 > `https://docker.m.daocloud.io`。换机器时记得同步这个配置。
 
-## 快速开始
+## 详细启动步骤
 
 ```bash
 # 1. 起基础设施
@@ -525,5 +616,6 @@ $ docker compose exec postgres psql -U llm -d llm -c \
 
 ## 文档
 
+- [docs/demo.md](docs/demo.md) — 3 分钟演示脚本（点什么、说什么、看什么）
 - [docs/architecture.md](docs/architecture.md) — 分层、数据流、会话持久化、前端接入、已知取舍
 - [docs/api-contract.md](docs/api-contract.md) — 12 个页面的接口契约与实现状态
