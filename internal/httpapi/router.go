@@ -72,16 +72,16 @@ func New(cfg config.Config, jwtMgr *auth.Manager, gw *gateway.Gateway, client *l
 	// 动作类
 	api.POST("/chat", s.chat)
 	api.GET("/documents", s.listDocuments)
-	api.POST("/documents", s.uploadDocument)
+	api.POST("/documents", s.jwt.RequireRole("admin"), s.uploadDocument)
 	api.GET("/documents/:id", s.getDocument)
-	api.POST("/documents/:id/retry", s.retryDocument)
+	api.POST("/documents/:id/retry", s.jwt.RequireRole("admin"), s.retryDocument)
 	api.POST("/retrieval/search", s.retrievalSearch)
 	api.POST("/retrieval/evaluate", s.retrievalEvaluate)
 	api.POST("/agent/run", s.agentRun)
-	api.POST("/gateway/drill", s.gatewayDrill)
-	api.POST("/eval/run", s.evalRun)
-	api.POST("/ops/backup", s.opsBackup)
-	api.POST("/ops/restore", s.opsRestore)
+	api.POST("/gateway/drill", s.jwt.RequireRole("admin"), s.gatewayDrill)
+	api.POST("/eval/run", s.jwt.RequireRole("admin"), s.evalRun)
+	api.POST("/ops/backup", s.jwt.RequireRole("admin"), s.opsBackup)
+	api.POST("/ops/restore", s.jwt.RequireRole("admin"), s.opsRestore)
 	api.PATCH("/ops/checklist/:id", s.opsChecklist)
 
 	// 前端静态资源 + SPA 兜底

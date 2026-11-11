@@ -119,3 +119,53 @@ func (m *Manager) Middleware() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// Role 是从 context 取角色。
+func RoleFrom(ctx context.Context) string {
+	if c, ok := From(ctx); ok {
+		return c.Role
+	}
+	return ""
+}
+
+// RequireRole 限制只有指定角色能访问；其余返回 403。
+//
+// 用独立中间件而不是在每个 handler 里判断：路由表上一眼能看出
+// 哪些接口是管理员的，漏加也会在 review 时暴露。
+func (m *Manager) RequireRole(roles ...string) gin.HandlerFunc {
+	allowed := make(map[string]struct{}, len(roles))
+	for _, r := range roles {
+		allowed[r] = struct{}{}
+	}
+
+	return func(c *gin.Context) {
+		claims, ok := From(c.Request.Context())
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": gin.H{"code": "unauthorized", "message": "未登录"},
+			})
+			return
+		}
+		if _, ok := allowed[claims.Role]; !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": gin.H{
+					"code":    "forbidden",
+					"message": "需要 " + joinRoles(roles) + " 角色，当前是 " + claims.Role,
+				},
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
+func joinRoles(roles []string) string {
+	out := ""
+	for i, r := range roles {
+		if i > 0 {
+			out += "/"
+		}
+		out += r
+	}
+	return out
+}

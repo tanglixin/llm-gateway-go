@@ -106,6 +106,18 @@ handler → s.tenantOf(c) 取租户 → 所有 SQL 带 tenant_id 过滤
 - **chat 也校验会话归属**：否则可以往别人会话里追加消息
 - **内部调用传空租户**：ETL 按 id 取文档时不需要租户限制
 
+### 角色
+
+`RequireRole` 是独立中间件，挂在路由表上：
+
+```go
+api.POST("/gateway/drill", s.jwt.RequireRole("admin"), s.gatewayDrill)
+```
+
+- 403 而不是 404：这里不需要隐藏接口存在性，反而要告诉用户「你没权限」
+- 前端禁用按钮只是体验，**后端才是闸门**
+- 目前只有 `admin` / `member` 两个角色，没有权限表
+
 ## AI 网关
 
 ```
@@ -258,6 +270,7 @@ main.ts
 | Trace | 回放页是示例 span | 真实链路要接 OTel SDK + collector |
 | 网关熔断状态 | 只在内存 | 重启清零，多实例之间不同步 |
 | 鉴权 | HS256 + 单密钥 | 无刷新 token、无吊销；多实例需共享 JWT_SECRET |
+| 角色 | admin / member 两级 | 没有细粒度权限表，也没有角色管理界面 |
 | 行级隔离 | 应用层 WHERE | 没开 Postgres RLS，直接连库仍可绕过 |
 | 检索策略 | BM25 + 向量 + 加权分数融合 | 混合与纯 BM25 持平，语料小时难以拉开差距 |
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |

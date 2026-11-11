@@ -219,6 +219,26 @@ TEST_POSTGRES_DSN='postgres://llm:llm@127.0.0.1:5432/llm?sslmode=disable' \
 > 这个测试是有来历的：第一版只做了列表过滤，`GET /api/conversations/{id}`
 > 竟然能让 demo 租户读到 acme-rd 的会话，`DELETE` 还能删掉。写测试时才发现。
 
+### 角色（RBAC）
+
+| 接口 | 角色要求 |
+| --- | --- |
+| `POST /api/gateway/drill` | admin |
+| `POST /api/eval/run` | admin |
+| `POST /api/ops/backup` / `restore` | admin |
+| `POST /api/documents`（上传） / `{id}/retry` | admin |
+| 其余读写接口 | 任意登录用户 |
+
+```bash
+# member 访问管理接口 → 403
+curl -s -X POST -H "Authorization: Bearer $MEMBER_TOKEN" localhost:8080/api/gateway/drill -d '{}'
+{"error":{"code":"forbidden","message":"需要 admin 角色，当前是 member"}}
+```
+
+角色判断放在**路由表**上（`s.jwt.RequireRole("admin")`），不是散在 handler 里——
+加接口时一眼能看出哪些是管理员的，漏加也容易发现。
+前端同步把按钮禁掉，但**真正拦住的是后端**。
+
 ### AI 网关：多 provider 路由
 
 ```bash
