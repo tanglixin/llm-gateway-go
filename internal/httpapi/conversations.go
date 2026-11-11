@@ -2,6 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -89,22 +92,22 @@ func (s *Server) deleteConversation(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// chat 调 Ollama 并把来回两条消息落库。
+// chat 调 Ollama 并把来回两条消息落库；stream=true 时走 SSE。
 func (s *Server) chat(c *gin.Context) {
 	var in struct {
 		ConversationID string `json:"conversationId"`
 		Prompt         string `json:"prompt"`
+		Stream         bool   `json:"stream"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil || strings.TrimSpace(in.Prompt) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"code": "invalid_request", "message": "prompt is required"}})
 		return
 	}
 	prompt := strings.TrimSpace(in.Prompt)
-	ctx := c.Request.Context()
 
 	convID := in.ConversationID
 	if convID == "" {
-		conv, err := s.db.CreateConversation(ctx, s.cfg.Tenant, "", s.llm.Model())
+		conv, err := s.db.CreateConversation(c.Request.Context(), s.cfg.Tenant, "", s.llm.Model())
 		if err != nil {
 			s.fail(c, err)
 			return
@@ -112,7 +115,16 @@ func (s *Server) chat(c *gin.Context) {
 		convID = conv.ID
 	}
 
-	// 客户端断开也要落库，用 WithoutCancel 保留值、去掉取消信号。
+	if in.Stream {
+		s.chatStream(c, convID, prompt)
+		return
+	}
+	s.chatOnce(c, convID, prompt)
+}
+
+// chatOnce 是非流式路径：等完整回答再返回。
+func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
+	ctx := c.Request.Context()
 	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
 
@@ -150,6 +162,101 @@ func (s *Server) chat(c *gin.Context) {
 		"model":          s.llm.Model(),
 		"latencyMs":      latency.Milliseconds(),
 	})
+}
+
+// chatStream 是流式路径：边生成边推 SSE，结束后落库。
+func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
+	ctx := c.Request.Context()
+
+	// 客户端断开后仍要落库，所以写库用 WithoutCancel。
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+
+	userMsg, err := s.db.AppendMessage(writeCtx, convID, store.Message{
+		Role: "user", Content: prompt, Model: s.llm.Model(),
+	})
+	if err != nil {
+		s.fail(c, err)
+		return
+	}
+
+	h := c.Writer.Header()
+	h.Set("Content-Type", "text/event-stream; charset=utf-8")
+	h.Set("Cache-Control", "no-cache, no-transform")
+	h.Set("Connection", "keep-alive")
+	h.Set("X-Accel-Buffering", "no")
+	h.Set("X-Conversation-Id", convID)
+	h.Set("X-User-Message-Id", userMsg.ID)
+	c.Writer.WriteHeader(http.StatusOK)
+	c.Writer.Flush()
+
+	start := time.Now()
+	var firstToken time.Duration
+	broken := false
+
+	answer, usage, err := s.llm.GenerateStream(ctx, prompt, func(delta string) error {
+		if firstToken == 0 {
+			firstToken = time.Since(start)
+		}
+		return sse(c, gin.H{
+			"object": "chat.completion.chunk",
+			"choices": []any{gin.H{
+				"index": 0,
+				"delta": gin.H{"content": delta},
+			}},
+		})
+	})
+	if err != nil {
+		broken = true
+		if ctx.Err() == nil {
+			_ = sse(c, gin.H{"error": gin.H{"code": "upstream_error", "message": err.Error()}})
+		}
+	}
+
+	latency := time.Since(start)
+
+	// 落助手消息（中途断开也保存已生成的部分）。
+	if answer != "" || usage.Prompt > 0 {
+		if _, perr := s.db.AppendMessage(writeCtx, convID, store.Message{
+			Role: "assistant", Content: answer, Model: s.llm.Model(),
+			TokensIn: usage.Prompt, TokensOut: usage.Completion, LatencyMs: int(latency.Milliseconds()),
+		}); perr != nil {
+			log.Printf("persist assistant message failed: %v", perr)
+		}
+	}
+
+	if !broken {
+		_ = sse(c, gin.H{
+			"object":  "chat.completion.chunk",
+			"choices": []any{},
+			"usage": gin.H{
+				"prompt":     usage.Prompt,
+				"completion": usage.Completion,
+				"total":      usage.Total(),
+			},
+			"ttftMs":    firstToken.Milliseconds(),
+			"latencyMs": latency.Milliseconds(),
+			"model":     s.llm.Model(),
+		})
+		_ = sseRaw(c, "[DONE]")
+	}
+}
+
+// sse 写一帧 JSON 并 flush。
+func sse(c *gin.Context, v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return sseRaw(c, string(b))
+}
+
+func sseRaw(c *gin.Context, payload string) error {
+	if _, err := fmt.Fprintf(c.Writer, "data: %s\n\n", payload); err != nil {
+		return err
+	}
+	c.Writer.Flush()
+	return nil
 }
 
 func pathUUID(c *gin.Context) (string, bool) {

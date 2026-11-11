@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/tmc/langchaingo/llms"
@@ -52,6 +53,26 @@ func (c *Client) Generate(ctx context.Context, prompt string) (string, token.Sta
 	}
 	choice := resp.Choices[0]
 	return choice.Content, token.FromGenerationInfo(choice.GenerationInfo), nil
+}
+
+// GenerateStream 流式生成：每拿到一段就回调 onDelta，最后返回完整文本与用量。
+func (c *Client) GenerateStream(ctx context.Context, prompt string, onDelta func(string) error) (string, token.Stats, error) {
+	var sb strings.Builder
+
+	resp, err := c.llm.GenerateContent(ctx, []llms.MessageContent{
+		llms.TextParts(llms.ChatMessageTypeHuman, prompt),
+	}, llms.WithMaxTokens(512), llms.WithStreamingFunc(func(_ context.Context, chunk []byte) error {
+		delta := string(chunk)
+		sb.WriteString(delta)
+		return onDelta(delta)
+	}))
+	if err != nil {
+		return "", token.Stats{}, fmt.Errorf("llm: stream: %w", err)
+	}
+	if len(resp.Choices) == 0 {
+		return "", token.Stats{}, fmt.Errorf("llm: empty response")
+	}
+	return sb.String(), token.FromGenerationInfo(resp.Choices[0].GenerationInfo), nil
 }
 
 // Healthy 探活：确认 Ollama 进程在跑且能响应。

@@ -187,8 +187,20 @@ llm-gateway_ollamadata
 | PATCH | `/api/conversations/{id}` | 改名 |
 | DELETE | `/api/conversations/{id}` | 删除（消息级联） |
 
-`POST /api/chat` 接受 `{conversationId?, prompt}`：不传 `conversationId` 会自动建会话；
-用户消息先落库，回答完成后助手消息再落库，标题由第一条用户消息生成。
+`POST /api/chat` 接受 `{conversationId?, prompt, stream?}`：
+
+- `stream: false`（默认）—— 等完整回答再返回 JSON
+- `stream: true` —— SSE 逐字推送，帧格式是 OpenAI 兼容的 chunk，
+  最后一帧带 `usage` 与 `ttftMs`，然后是 `[DONE]`
+
+不传 `conversationId` 会自动建会话（id 通过 `X-Conversation-Id` 响应头带回来）；
+用户消息先落库，回答完成后助手消息再落库；中途断开也会保存已生成的部分。
+
+```bash
+curl -N -X POST localhost:8080/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"用三句话介绍杭州","stream":true}'
+```
 
 ## 前端
 

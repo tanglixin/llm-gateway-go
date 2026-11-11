@@ -44,12 +44,13 @@
 ## 一次问答的数据流
 
 ```
-浏览器 POST /api/chat {conversationId?, prompt}
+浏览器 POST /api/chat {conversationId?, prompt, stream?}
    │
    ├─ conversationId 为空 → 新建会话（title 由首条用户消息生成）
    ├─ 落库：messages(role=user)
    │
-   ├─ llm.Client.Generate
+   ├─ llm.Client.Generate        （stream=false：等完整回答）
+   │  或 llm.Client.GenerateStream（stream=true：边收边推 SSE）
    │     └─ langchaingo → Ollama POST /api/chat  (NDJSON)
    │     ← 回答 + GenerationInfo{PromptTokens, CompletionTokens}
    │
@@ -60,6 +61,13 @@
    ▼
 200 {conversationId, answer, usage, model, latencyMs}
 ```
+
+### 流式的边界
+
+- **写帧失败 = 客户端已断开**：`onDelta` 返回 error 会让 langchaingo 中断生成，
+  避免继续白烧算力；已生成的部分仍会落库。
+- **`ttftMs` 由服务端测量**（首个 delta 的时间），客户端还会再测一次并取更小值。
+- 帧格式保持 OpenAI 兼容，前端只认 `choices[0].delta.content`。
 
 两个实现细节：
 
@@ -135,14 +143,14 @@ main.ts
 | 项 | 现状 | 影响 |
 | --- | --- | --- |
 | 看板数据 | 内存种子（`internal/data`） | 重启回到初始值；结构已定型，换 SQL 即可 |
-| 聊天 | 非流式，等完整回答 | 0.5B 约 0.7s；7B 要十几秒才出字 |
+| 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |
 | 多租户 | `tenant_id` 恒为 `default` | 没有鉴权，任何人都是同一租户 |
 | 动作接口 | 返回模拟结果 | 上传/评测/备份尚未真正执行 |
 
 ## 下一步
 
-- [ ] `/api/chat` 改 SSE：首个 token 就渲染
+- [x] `/api/chat` 改 SSE：首个 token 就渲染
 - [ ] 文档接入 MinIO + Redis 队列：ETL 五阶段
 - [ ] pgvector 检索：混合检索 + rerank
 - [ ] 看板数据从内存种子换成真实查询（usage / trace / eval）
