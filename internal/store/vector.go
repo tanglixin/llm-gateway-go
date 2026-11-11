@@ -110,3 +110,26 @@ func vectorLiteral(v []float32) string {
 	sb.WriteByte(']')
 	return sb.String()
 }
+
+// AllChunks 返回租户下的全部分块（供内存 BM25 建索引）。
+func (s *Store) AllChunks(ctx context.Context, tenant string) ([]Chunk, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id::text, c.document_id::text, d.name, c.idx, c.content, 0
+		FROM chunks c JOIN documents d ON d.id = c.document_id
+		WHERE c.tenant_id = $1
+		ORDER BY c.document_id, c.idx`, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Chunk
+	for rows.Next() {
+		var c Chunk
+		if err := rows.Scan(&c.ID, &c.DocumentID, &c.Name, &c.Idx, &c.Content, &c.Score); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

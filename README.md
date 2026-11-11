@@ -202,6 +202,35 @@ curl -s -X POST localhost:8080/api/documents/<id>/retry
 - 失败会写 `documents.error`，前端显示「解析失败」并可重试
 - `.docx` 暂不支持（提示先转 PDF/Markdown）
 
+### 检索的三种模式
+
+```bash
+curl -s -X POST localhost:8080/api/retrieval/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"一线城市住宿上限","mode":"hybrid","topK":3}'
+
+# 评测：7 条 Golden Set × 3 模式，返回 Recall@5 / MRR / NDCG@5
+curl -s -X POST localhost:8080/api/retrieval/evaluate
+```
+
+| 模式 | 实现 |
+| --- | --- |
+| `bm25` | 内存倒排索引，中文按字符 bigram 切词（`一线城市` → `一线/线城/城市`） |
+| `vector` | pgvector 余弦相似度 |
+| `hybrid` | 两路各取 Top-20，用 RRF（k=60）融合 |
+
+实测（7 条 Golden Set，语料 5 篇 11 块）：
+
+| 模式 | Recall@5 | MRR | NDCG@5 | 检索耗时 |
+| --- | --- | --- | --- | --- |
+| BM25 | 1.00 | **0.81** | **0.86** | 1 ms |
+| 向量 | 0.86 | 0.69 | 0.73 | 2 ms |
+| 混合 RRF | 1.00 | 0.65 | 0.74 | 10 ms |
+
+**注意**：混合的 MRR 反而低于纯 BM25。这批查询几乎都是原文里的词，
+BM25 本就接近满分；无差别的 RRF 把较弱的向量结果按名次混进来，反而把正确结果从第 1 位挤下去。
+要修正得靠**加权 RRF**（词法权重更高）或加一层 **rerank**——这也是下一步。
+
 ### 向量检索
 
 文档 → 分块 → embedding（`nomic-embed-text`，768 维）→ pgvector，检索走余弦距离：

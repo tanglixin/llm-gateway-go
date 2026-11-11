@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 	"github.com/llm-gateway/llm-gateway/internal/data"
 	"github.com/llm-gateway/llm-gateway/internal/llm"
 	"github.com/llm-gateway/llm-gateway/internal/queue"
+	"github.com/llm-gateway/llm-gateway/internal/search"
 	"github.com/llm-gateway/llm-gateway/internal/store"
 )
 
@@ -28,6 +30,10 @@ type Server struct {
 	db    *store.Store
 	blob  *blob.Client
 	queue *queue.Queue
+
+	ixMu sync.Mutex
+	ix   *search.Index
+	ixN  int
 }
 
 // New 构造路由。
@@ -59,6 +65,7 @@ func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Stor
 	r.GET("/api/documents/:id", s.getDocument)
 	r.POST("/api/documents/:id/retry", s.retryDocument)
 	r.POST("/api/retrieval/search", s.retrievalSearch)
+	r.POST("/api/retrieval/evaluate", s.retrievalEvaluate)
 	r.POST("/api/agent/run", s.agentRun)
 	r.POST("/api/gateway/drill", s.gatewayDrill)
 	r.POST("/api/eval/run", s.evalRun)

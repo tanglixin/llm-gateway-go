@@ -53,29 +53,23 @@ type Cite struct {
 	Score   float64 `json:"score"`
 }
 
-// retrievalSearch 真实向量检索：查询向量化 → pgvector 余弦相似度。
+// retrievalSearch 支持三种模式：bm25 / vector / hybrid（RRF 融合）。
 func (s *Server) retrievalSearch(c *gin.Context) {
 	var in struct {
-		Query     string  `json:"query"`
-		Mode      string  `json:"mode"`
-		TopK      int     `json:"topK"`
-		Threshold float64 `json:"threshold"`
+		Query string `json:"query"`
+		Mode  string `json:"mode"`
+		TopK  int    `json:"topK"`
 	}
 	_ = c.ShouldBindJSON(&in)
 	if in.TopK <= 0 {
 		in.TopK = 5
 	}
 	if in.Mode == "" {
-		in.Mode = "vector"
+		in.Mode = "hybrid"
 	}
 
 	start := time.Now()
-	vec, err := s.emb.Embed(c.Request.Context(), in.Query)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "embed_error", "message": err.Error()}})
-		return
-	}
-	hits, err := s.db.SearchChunks(c.Request.Context(), s.cfg.Tenant, vec, in.TopK)
+	hits, err := s.searchAll(c.Request.Context(), in.Query, in.Mode, in.TopK)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "search_error", "message": err.Error()}})
 		return
@@ -84,7 +78,6 @@ func (s *Server) retrievalSearch(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"mode":       in.Mode,
 		"topK":       in.TopK,
-		"threshold":  in.Threshold,
 		"hits":       hits,
 		"tookMs":     time.Since(start).Milliseconds(),
 		"embedModel": s.emb.Model(),

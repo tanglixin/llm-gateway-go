@@ -91,6 +91,24 @@ POST /api/documents → MinIO(原件) → documents 行(status=uploaded) → RPU
 - **替旧重来**：重试时先 `DELETE FROM chunks WHERE document_id = ...` 再插入，不会留下旧分块
 - **队列用 Redis list** 而不是 Asynq：够用、零额外依赖，`BLPOP` 天然阻塞
 
+## 检索
+
+| 模式 | 实现 | 位置 |
+| --- | --- | --- |
+| bm25 | 内存倒排索引 + CJK bigram 分词 | `internal/search/bm25.go` |
+| vector | pgvector 余弦 | `internal/store/vector.go` |
+| hybrid | 两路 Top-20 → RRF(k=60) | `internal/search/bm25.go` |
+
+- **中文没有空格**：用字符 bigram（`一线城市` → `一线/线城/城市`），
+  英文数字按连续字符切。这是最省事的做法，代价是索引膨胀约 2 倍。
+- **BM25 索引在内存里**，分块数变化时自动重建（`CountDocuments` 比对）。
+  语料上千块后应该换成独立搜索引擎或 Postgres `tsvector`。
+- **评测是真实的**：`internal/search/golden.go` 里 7 条「查询 → 期望文档」，
+  `POST /api/retrieval/evaluate` 现场跑三种模式算 Recall@5 / MRR / NDCG@5。
+
+> 实测结论：混合 RRF 的 MRR（0.65）低于纯 BM25（0.81）。查询几乎都是原文词，
+> BM25 接近满分，无差别 RRF 会把向量结果混进来反而降序。需要加权 RRF 或 rerank。
+
 ## 向量检索（RAG）
 
 ```
@@ -175,7 +193,7 @@ main.ts
 | 项 | 现状 | 影响 |
 | --- | --- | --- |
 | 看板数据 | 内存种子（`internal/data`） | 重启回到初始值；结构已定型，换 SQL 即可 |
-| 检索策略 | 纯向量，无 BM25/rerank | 前端「混合检索」的对比表仍是静态样例 |
+| 检索策略 | BM25 + 向量 + 无权重 RRF | 混合的 MRR 不如纯 BM25，待加权重或 rerank |
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |
 | 多租户 | `tenant_id` 恒为 `default` | 没有鉴权，任何人都是同一租户 |
@@ -187,5 +205,6 @@ main.ts
 - [x] `/api/chat` 改 SSE：首个 token 就渲染
 - [x] 文档接入 MinIO + Redis 队列：ETL 五阶段
 - [x] pgvector 检索：余弦相似度 + HNSW
-- [ ] 混合检索（BM25 + 向量）与 rerank
+- [x] 混合检索（BM25 + 向量 + RRF）
+- [ ] rerank / 加权 RRF，把混合的 MRR 拉回 BM25 之上
 - [ ] 看板数据从内存种子换成真实查询（usage / trace / eval）

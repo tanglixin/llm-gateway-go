@@ -46,7 +46,8 @@
 | POST | `/api/documents` | multipart `file` 或 `{name, content}` | ✅ 存 MinIO + 入队，返回文档 |
 | GET | `/api/documents/{id}` | — | 单条（轮询 ETL 进度） |
 | POST | `/api/documents/{id}/retry` | — | ✅ 重置阶段并重新入队 |
-| POST | `/api/retrieval/search` | `{query, topK}` | ✅ pgvector 余弦检索，返回 `{hits, tookMs, embedModel}` |
+| POST | `/api/retrieval/search` | `{query, mode, topK}` | ✅ `mode` = bm25 / vector / hybrid |
+| POST | `/api/retrieval/evaluate` | — | ✅ 7 条 Golden Set × 3 模式，返回真实指标 |
 | POST | `/api/agent/run` | `{task}` | 返回 ReAct 步骤数组 |
 | POST | `/api/gateway/drill` | `{enable}` | 故障演练开关 |
 | POST | `/api/eval/run` | `{version}` | 触发回归，返回结果 |
