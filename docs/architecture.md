@@ -76,6 +76,22 @@
 - **Ollama 返回 NDJSON**：每行一个 JSON，必须逐行解析。多行 pretty-print 的 JSON
   会被 `bufio.Scanner` 拆碎，第一行 `{` 直接解析失败——写 mock 时踩过。
 
+## 用量聚合
+
+`GET /api/usage/summary?range=today|all` 直接从 `messages` 表算：
+
+```
+count / sum(tokens_in) / sum(tokens_out) / avg(latency_ms)
+percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms)
+GROUP BY model  → 按模型拆成本
+ORDER BY created_at DESC LIMIT 5 → 最近调用
+GROUP BY to_char(created_at,'MM-DD') → 近 7 天
+```
+
+- **不建汇总表**：数据量还小，实时聚合最简单且不会算错
+- **成本公式只有一处**：`store.cost()`，前端只是展示
+- 注意 `avg()` / `percentile_cont()` 返回 numeric，扫进 `int64` 会报错，必须 `::bigint`
+
 ## 文档 ETL
 
 ```
@@ -97,7 +113,7 @@ POST /api/documents → MinIO(原件) → documents 行(status=uploaded) → RPU
 | --- | --- | --- |
 | bm25 | 内存倒排索引 + CJK bigram 分词 | `internal/search/bm25.go` |
 | vector | pgvector 余弦 | `internal/store/vector.go` |
-| hybrid | 两路 Top-20 → RRF(k=60) | `internal/search/bm25.go` |
+| hybrid | 两路 Top-20 → 加权分数融合（0.6 词法 + 0.4 向量） | `internal/search/fusion.go` |
 
 - **中文没有空格**：用字符 bigram（`一线城市` → `一线/线城/城市`），
   英文数字按连续字符切。这是最省事的做法，代价是索引膨胀约 2 倍。
@@ -106,8 +122,8 @@ POST /api/documents → MinIO(原件) → documents 行(status=uploaded) → RPU
 - **评测是真实的**：`internal/search/golden.go` 里 7 条「查询 → 期望文档」，
   `POST /api/retrieval/evaluate` 现场跑三种模式算 Recall@5 / MRR / NDCG@5。
 
-> 实测结论：混合 RRF 的 MRR（0.65）低于纯 BM25（0.81）。查询几乎都是原文词，
-> BM25 接近满分，无差别 RRF 会把向量结果混进来反而降序。需要加权 RRF 或 rerank。
+> 实测结论：RRF 的 MRR 只有 0.65（低于纯 BM25 0.81），换成加权分数融合后回到 0.79。
+> 教训是「名次融合」会抹平某一路的置信度优势，分数融合不会。
 
 ## 向量检索（RAG）
 
@@ -192,12 +208,12 @@ main.ts
 
 | 项 | 现状 | 影响 |
 | --- | --- | --- |
-| 看板数据 | 内存种子（`internal/data`） | 重启回到初始值；结构已定型，换 SQL 即可 |
-| 检索策略 | BM25 + 向量 + 无权重 RRF | 混合的 MRR 不如纯 BM25，待加权重或 rerank |
+| 看板数据 | 总览/成本/检索页已接真实聚合；可观测、评测、安全仍是种子 | 剩余页面结构已定型，换 SQL 即可 |
+| 检索策略 | BM25 + 向量 + 加权分数融合 | 混合与纯 BM25 持平，语料小时难以拉开差距 |
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |
 | 多租户 | `tenant_id` 恒为 `default` | 没有鉴权，任何人都是同一租户 |
-| 文档格式 | `md/txt/pdf` | `.docx` 需先转换；扫描件 PDF 无文本层会失败 |
+| 文档格式 | `md/txt/pdf/docx` | 扫描件 PDF 无文本层会明确报错 |
 | 动作接口 | 评测/备份仍返回模拟结果 | 上传与 ETL 已是真实实现 |
 
 ## 下一步
@@ -206,5 +222,6 @@ main.ts
 - [x] 文档接入 MinIO + Redis 队列：ETL 五阶段
 - [x] pgvector 检索：余弦相似度 + HNSW
 - [x] 混合检索（BM25 + 向量 + RRF）
-- [ ] rerank / 加权 RRF，把混合的 MRR 拉回 BM25 之上
+- [x] 加权分数融合（替代 RRF），MRR 从 0.65 回到 0.79
+- [ ] rerank：需要交叉编码器，且要有更大的 Golden Set 才能证明有效
 - [ ] 看板数据从内存种子换成真实查询（usage / trace / eval）

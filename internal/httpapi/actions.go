@@ -56,9 +56,10 @@ type Cite struct {
 // retrievalSearch 支持三种模式：bm25 / vector / hybrid（RRF 融合）。
 func (s *Server) retrievalSearch(c *gin.Context) {
 	var in struct {
-		Query string `json:"query"`
-		Mode  string `json:"mode"`
-		TopK  int    `json:"topK"`
+		Query string  `json:"query"`
+		Mode  string  `json:"mode"`
+		TopK  int     `json:"topK"`
+		Alpha float64 `json:"alpha"`
 	}
 	_ = c.ShouldBindJSON(&in)
 	if in.TopK <= 0 {
@@ -68,8 +69,13 @@ func (s *Server) retrievalSearch(c *gin.Context) {
 		in.Mode = "hybrid"
 	}
 
+	alpha := in.Alpha
+	if alpha <= 0 {
+		alpha = defaultAlpha
+	}
+
 	start := time.Now()
-	hits, err := s.searchAll(c.Request.Context(), in.Query, in.Mode, in.TopK)
+	hits, err := s.searchAll(c.Request.Context(), in.Query, in.Mode, in.TopK, alpha)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "search_error", "message": err.Error()}})
 		return
@@ -81,6 +87,7 @@ func (s *Server) retrievalSearch(c *gin.Context) {
 		"hits":       hits,
 		"tookMs":     time.Since(start).Milliseconds(),
 		"embedModel": s.emb.Model(),
+		"alpha":      alpha,
 	})
 }
 

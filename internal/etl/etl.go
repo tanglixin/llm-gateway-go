@@ -147,7 +147,7 @@ func extract(name string, data []byte) (string, error) {
 		}
 		return string(b), nil
 	case strings.HasSuffix(lower, ".docx"):
-		return "", fmt.Errorf("暂不支持 .docx，请先转成 PDF 或 Markdown")
+		return docxText(data)
 	default:
 		return string(data), nil
 	}

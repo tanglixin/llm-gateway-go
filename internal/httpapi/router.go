@@ -50,6 +50,7 @@ func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Stor
 	// 12 个页面的初始数据
 	r.GET("/api/bootstrap", s.bootstrap)
 	r.GET("/api/meta/pages", s.pagesMeta)
+	r.GET("/api/usage/summary", s.usageSummary)
 
 	// 会话（持久化）
 	r.GET("/api/conversations", s.listConversations)
