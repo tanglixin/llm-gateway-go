@@ -1,0 +1,90 @@
+# llm-gateway 本地基础设施
+#
+#   cd deploy && cp .env.example .env && docker compose up -d
+#
+# 四个服务都带 healthcheck，`docker compose ps` 里应全部显示 (healthy)。
+name: llm-gateway
+
+services:
+  # PostgreSQL + pgvector：业务数据与向量检索
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: llm-gw-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-llm}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-llm}
+      POSTGRES_DB: ${POSTGRES_DB:-llm}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-llm} -d ${POSTGRES_DB:-llm}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  # Redis：缓存 / 异步队列
+  redis:
+    image: redis:7-alpine
+    container_name: llm-gw-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # MinIO：对象存储（文档原件）
+  #
+  # 镜像用 bitnamilegacy/minio：官方 minio/minio 已从 Docker Hub 下架，
+  # quay.io/minio/minio 需要授权。Bitnami 打包的是同一份 MinIO 二进制。
+  # 注意：这个版本不内置 Web 控制台，用 mc 客户端操作：
+  #   docker compose exec minio mc alias set local http://127.0.0.1:9000 minioadmin minioadmin
+  minio:
+    image: bitnamilegacy/minio:latest
+    container_name: llm-gw-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_API_PORT_NUMBER: 9000
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+    volumes:
+      - miniodata:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  # Ollama：本地推理。镜像启动后是空的，需要 pull 模型（make pull）
+  ollama:
+    image: ollama/ollama:latest
+    container_name: llm-gw-ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollamadata:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  ollamadata:

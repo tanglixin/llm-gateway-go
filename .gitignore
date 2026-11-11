@@ -1,0 +1,11 @@
+bin/
+dist/
+deploy/.env
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# 前端构建产物（由 llm-gateway-ui 构建后复制进来）
+web/assets/
+web/index.html
