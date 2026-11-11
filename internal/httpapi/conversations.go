@@ -125,26 +125,33 @@ func (s *Server) chat(c *gin.Context) {
 // chatOnce 是非流式路径：等完整回答再返回。
 func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 	ctx := c.Request.Context()
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-	defer cancel()
 
-	userMsg, err := s.db.AppendMessage(writeCtx, convID, store.Message{
+	// 用户消息先落库（短超时；此时还没有生成）
+	userCtx, cancelUser := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	userMsg, err := s.db.AppendMessage(userCtx, convID, store.Message{
 		Role: "user", Content: prompt, Model: s.llm.Model(),
 	})
+	cancelUser()
 	if err != nil {
 		s.fail(c, err)
 		return
 	}
 
+	// RAG：先检索，把片段拼进提示词
+	cites, ctxText := s.retrieve(ctx, prompt, 3)
+
 	start := time.Now()
-	answer, usage, err := s.llm.Generate(ctx, prompt)
+	answer, usage, err := s.llm.Generate(ctx, buildRAGPrompt(cites, ctxText, prompt))
 	latency := time.Since(start)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "upstream_error", "message": err.Error()}})
 		return
 	}
 
-	assistantMsg, err := s.db.AppendMessage(writeCtx, convID, store.Message{
+	// 助手消息在生成之后落库，必须重新给超时（生成可能已经跑了几十秒）
+	asstCtx, cancelAsst := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancelAsst()
+	assistantMsg, err := s.db.AppendMessage(asstCtx, convID, store.Message{
 		Role: "assistant", Content: answer, Model: s.llm.Model(),
 		TokensIn: usage.Prompt, TokensOut: usage.Completion, LatencyMs: int(latency.Milliseconds()),
 	})
@@ -161,6 +168,7 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 		"usage":          usage,
 		"model":          s.llm.Model(),
 		"latencyMs":      latency.Milliseconds(),
+		"cites":          cites,
 	})
 }
 
@@ -168,13 +176,11 @@ func (s *Server) chatOnce(c *gin.Context, convID, prompt string) {
 func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	ctx := c.Request.Context()
 
-	// 客户端断开后仍要落库，所以写库用 WithoutCancel。
-	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	defer cancel()
-
-	userMsg, err := s.db.AppendMessage(writeCtx, convID, store.Message{
+	userCtx, cancelUser := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	userMsg, err := s.db.AppendMessage(userCtx, convID, store.Message{
 		Role: "user", Content: prompt, Model: s.llm.Model(),
 	})
+	cancelUser()
 	if err != nil {
 		s.fail(c, err)
 		return
@@ -190,11 +196,13 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 	c.Writer.WriteHeader(http.StatusOK)
 	c.Writer.Flush()
 
+	cites, ctxText := s.retrieve(ctx, prompt, 3)
+
 	start := time.Now()
 	var firstToken time.Duration
 	broken := false
 
-	answer, usage, err := s.llm.GenerateStream(ctx, prompt, func(delta string) error {
+	answer, usage, err := s.llm.GenerateStream(ctx, buildRAGPrompt(cites, ctxText, prompt), func(delta string) error {
 		if firstToken == 0 {
 			firstToken = time.Since(start)
 		}
@@ -215,9 +223,11 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 
 	latency := time.Since(start)
 
-	// 落助手消息（中途断开也保存已生成的部分）。
+	// 落助手消息（中途断开也保存已生成的部分）；超时重新计算。
+	asstCtx, cancelAsst := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancelAsst()
 	if answer != "" || usage.Prompt > 0 {
-		if _, perr := s.db.AppendMessage(writeCtx, convID, store.Message{
+		if _, perr := s.db.AppendMessage(asstCtx, convID, store.Message{
 			Role: "assistant", Content: answer, Model: s.llm.Model(),
 			TokensIn: usage.Prompt, TokensOut: usage.Completion, LatencyMs: int(latency.Milliseconds()),
 		}); perr != nil {
@@ -237,6 +247,7 @@ func (s *Server) chatStream(c *gin.Context, convID, prompt string) {
 			"ttftMs":    firstToken.Milliseconds(),
 			"latencyMs": latency.Milliseconds(),
 			"model":     s.llm.Model(),
+			"cites":     cites,
 		})
 		_ = sseRaw(c, "[DONE]")
 	}

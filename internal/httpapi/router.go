@@ -21,13 +21,14 @@ import (
 type Server struct {
 	cfg  config.Config
 	llm  *llm.Client
+	emb  *llm.Embedder
 	data *data.Store
 	db   *store.Store
 }
 
 // New 构造路由。
-func New(cfg config.Config, client *llm.Client, st *data.Store, db *store.Store) *gin.Engine {
-	s := &Server{cfg: cfg, llm: client, data: st, db: db}
+func New(cfg config.Config, client *llm.Client, emb *llm.Embedder, st *data.Store, db *store.Store) *gin.Engine {
+	s := &Server{cfg: cfg, llm: client, emb: emb, data: st, db: db}
 
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())

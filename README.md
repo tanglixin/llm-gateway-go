@@ -177,6 +177,22 @@ llm-gateway_ollamadata
 
 `make down` 只停容器、保留数据；`down -v` 才会连数据一起删。
 
+### 向量检索
+
+文档 → 分块 → embedding（`nomic-embed-text`，768 维）→ pgvector，检索走余弦距离：
+
+```bash
+curl -s -X POST localhost:8080/api/retrieval/search \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"一线城市住宿上限","topK":3}'
+```
+
+首次启动时若 `documents` 表为空，会自动灌入 3 份示例文档（7 个分块，含向量）。
+想重新灌数据：`docker compose exec postgres psql -U llm -d llm -c "TRUNCATE documents CASCADE;"`，重启服务即可。
+
+问答默认走 RAG：先检索 top-3 片段拼进提示词，回答里带 `cites`（来源、片段、相关度），
+前端渲染成可点的引用卡。
+
 ### 会话接口
 
 | 方法 | 路径 | 说明 |

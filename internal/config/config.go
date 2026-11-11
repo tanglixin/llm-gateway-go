@@ -8,6 +8,7 @@ type Config struct {
 	Addr          string
 	OllamaBaseURL string
 	OllamaModel   string
+	OllamaEmbed   string
 	PostgresDSN   string
 	Tenant        string
 	RedisAddr     string
@@ -20,6 +21,7 @@ func Load() Config {
 		Addr:          env("SERVER_ADDR", ":8080"),
 		OllamaBaseURL: env("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
 		OllamaModel:   env("OLLAMA_MODEL", "qwen2:0.5b"),
+		OllamaEmbed:   env("OLLAMA_EMBED_MODEL", "nomic-embed-text"),
 		PostgresDSN:   env("POSTGRES_DSN", "postgres://llm:llm@127.0.0.1:5432/llm?sslmode=disable"),
 		Tenant:        env("NOVA_TENANT", "default"),
 		RedisAddr:     env("REDIS_ADDR", "127.0.0.1:6379"),

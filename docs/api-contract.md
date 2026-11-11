@@ -44,7 +44,7 @@
 | DELETE | `/api/conversations/{id}` | — | 删除（消息级联） |
 | POST | `/api/documents` | `{name}` | 模拟上传，返回新文档 `{id,...}` |
 | POST | `/api/documents/{id}/retry` | — | 重试解析，返回更新后的文档 |
-| POST | `/api/retrieval/search` | `{query, mode, topK, threshold}` | 返回片段列表与指标 |
+| POST | `/api/retrieval/search` | `{query, topK}` | ✅ pgvector 余弦检索，返回 `{hits, tookMs, embedModel}` |
 | POST | `/api/agent/run` | `{task}` | 返回 ReAct 步骤数组 |
 | POST | `/api/gateway/drill` | `{enable}` | 故障演练开关 |
 | POST | `/api/eval/run` | `{version}` | 触发回归，返回结果 |

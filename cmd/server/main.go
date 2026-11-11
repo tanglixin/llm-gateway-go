@@ -14,6 +14,7 @@ import (
 	"github.com/llm-gateway/llm-gateway/internal/config"
 	"github.com/llm-gateway/llm-gateway/internal/data"
 	"github.com/llm-gateway/llm-gateway/internal/httpapi"
+	"github.com/llm-gateway/llm-gateway/internal/kb"
 	"github.com/llm-gateway/llm-gateway/internal/llm"
 	"github.com/llm-gateway/llm-gateway/internal/store"
 )
@@ -45,9 +46,17 @@ func run() error {
 	}
 	log.Info("postgres ready", "dsn", cfg.PostgresDSN)
 
+	emb, err := llm.NewEmbedder(cfg.OllamaBaseURL, cfg.OllamaEmbed)
+	if err != nil {
+		return err
+	}
+	if err := kb.Seed(context.Background(), db, emb, cfg.Tenant); err != nil {
+		log.Warn("knowledge base seed failed", "error", err)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpapi.New(cfg, client, data.New(), db),
+		Handler:           httpapi.New(cfg, client, emb, data.New(), db),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 

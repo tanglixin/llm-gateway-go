@@ -76,6 +76,22 @@
 - **Ollama 返回 NDJSON**：每行一个 JSON，必须逐行解析。多行 pretty-print 的 JSON
   会被 `bufio.Scanner` 拆碎，第一行 `{` 直接解析失败——写 mock 时踩过。
 
+## 向量检索（RAG）
+
+```
+文档 → 分块（按段落，>300 字切） → nomic-embed-text(768) → chunks.embedding
+查询 → 同一模型向量化 → ORDER BY embedding <=> $1 LIMIT k（余弦） → 拼进提示词
+```
+
+- **同库同事务**：`chunks` 表就在业务库里，向量检索和 ACL 过滤一条 SQL 完成
+- **HNSW 索引**：`CREATE INDEX ... USING hnsw (embedding vector_cosine_ops)`
+- **ACL 前置**：`WHERE c.tenant_id = $2` 在排序前生效，不是召回后再过滤
+- **提示词刻意做简单**：小模型（qwen2:0.5b）对长指令遵循差，
+  用「资料 + 问题 + 回答：」的补全格式反而答得准
+
+> 踩过的坑：写库的 `context.WithTimeout` 不能在建流前创建——生成本身要 30s+，
+> 等生成完再落库时上下文早就过期了。现在用户消息和助手消息各自创建超时。
+
 ## 会话持久化
 
 | 表 | 关键字段 |
@@ -125,7 +141,8 @@ main.ts
 | --- | --- | --- |
 | `SERVER_ADDR` | `:8080` | 监听地址 |
 | `OLLAMA_BASE_URL` | `http://127.0.0.1:11434` | Ollama 地址 |
-| `OLLAMA_MODEL` | `qwen2:0.5b` | 默认模型（7B 需约 5G 内存） |
+| `OLLAMA_MODEL` | `qwen2:0.5b` | 对话模型（7B 需约 5G 内存） |
+| `OLLAMA_EMBED_MODEL` | `nomic-embed-text` | 向量模型（768 维） |
 | `POSTGRES_DSN` | `postgres://llm:llm@127.0.0.1:5432/llm?sslmode=disable` | 数据库 |
 | `NOVA_TENANT` | `default` | 租户标识（当前单租户） |
 | `REDIS_ADDR` | `127.0.0.1:6379` | 预留 |
@@ -143,6 +160,7 @@ main.ts
 | 项 | 现状 | 影响 |
 | --- | --- | --- |
 | 看板数据 | 内存种子（`internal/data`） | 重启回到初始值；结构已定型，换 SQL 即可 |
+| 检索策略 | 纯向量，无 BM25/rerank | 前端「混合检索」的对比表仍是静态样例 |
 | 聊天 | 已支持 SSE 流式 | 首字约 0.2s；后续速度受模型与 CPU 限制 |
 | 消息列表 | 一次拉全量 | 长会话会有压力，需要分页 |
 | 多租户 | `tenant_id` 恒为 `default` | 没有鉴权，任何人都是同一租户 |
@@ -152,5 +170,6 @@ main.ts
 
 - [x] `/api/chat` 改 SSE：首个 token 就渲染
 - [ ] 文档接入 MinIO + Redis 队列：ETL 五阶段
-- [ ] pgvector 检索：混合检索 + rerank
+- [x] pgvector 检索：余弦相似度 + HNSW
+- [ ] 混合检索（BM25 + 向量）与 rerank
 - [ ] 看板数据从内存种子换成真实查询（usage / trace / eval）

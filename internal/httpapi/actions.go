@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"fmt"
+	"math"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -78,7 +81,16 @@ func (s *Server) retryDocument(c *gin.Context) {
 	c.JSON(http.StatusOK, doc)
 }
 
-// retrievalSearch 按查询词做一次朴素打分，返回片段。
+// Cite 是一条引用。
+type Cite struct {
+	N       int     `json:"n"`
+	Doc     string  `json:"doc"`
+	Chunk   string  `json:"chunk"`
+	Snippet string  `json:"snippet"`
+	Score   float64 `json:"score"`
+}
+
+// retrievalSearch 真实向量检索：查询向量化 → pgvector 余弦相似度。
 func (s *Server) retrievalSearch(c *gin.Context) {
 	var in struct {
 		Query     string  `json:"query"`
@@ -87,21 +99,72 @@ func (s *Server) retrievalSearch(c *gin.Context) {
 		Threshold float64 `json:"threshold"`
 	}
 	_ = c.ShouldBindJSON(&in)
-	if in.Mode == "" {
-		in.Mode = "hybrid"
-	}
 	if in.TopK <= 0 {
 		in.TopK = 5
 	}
+	if in.Mode == "" {
+		in.Mode = "vector"
+	}
 
-	hits := s.data.Search(in.Query, in.Mode, in.TopK)
+	start := time.Now()
+	vec, err := s.emb.Embed(c.Request.Context(), in.Query)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{"code": "embed_error", "message": err.Error()}})
+		return
+	}
+	hits, err := s.db.SearchChunks(c.Request.Context(), s.cfg.Tenant, vec, in.TopK)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": gin.H{"code": "search_error", "message": err.Error()}})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"mode":      in.Mode,
-		"topK":      in.TopK,
-		"threshold": in.Threshold,
-		"hits":      hits,
-		"tookMs":    12,
+		"mode":       in.Mode,
+		"topK":       in.TopK,
+		"threshold":  in.Threshold,
+		"hits":       hits,
+		"tookMs":     time.Since(start).Milliseconds(),
+		"embedModel": s.emb.Model(),
 	})
+}
+
+// retrieve 供 RAG 用：取 top-k 片段并拼成上下文。
+func (s *Server) retrieve(ctx context.Context, query string, k int) ([]Cite, string) {
+	vec, err := s.emb.Embed(ctx, query)
+	if err != nil {
+		return nil, ""
+	}
+	hits, err := s.db.SearchChunks(ctx, s.cfg.Tenant, vec, k)
+	if err != nil {
+		return nil, ""
+	}
+
+	cites := make([]Cite, 0, len(hits))
+	var sb strings.Builder
+	for i, h := range hits {
+		cites = append(cites, Cite{
+			N:       i + 1,
+			Doc:     h.Name,
+			Chunk:   fmt.Sprintf("ck_%02d", h.Idx+1),
+			Snippet: h.Content,
+			Score:   math.Round(h.Score*1000) / 1000,
+		})
+		fmt.Fprintf(&sb, "[%d] 来源：%s\n%s\n\n", i+1, h.Name, h.Content)
+	}
+	return cites, sb.String()
+}
+
+// buildRAGPrompt 把检索结果拼进提示词。
+//
+// 模板刻意做得简单：小模型（qwen2:0.5b）对长指令的遵循度很差，
+// 用「资料 + 问题 + 回答：」这种补全格式反而答得对。
+func buildRAGPrompt(cites []Cite, contextText, question string) string {
+	if len(cites) == 0 {
+		return question
+	}
+	return "根据资料回答问题，不要编造资料里没有的内容。\n\n" +
+		"资料：\n" + contextText +
+		"\n问题：" + question + "\n回答："
 }
 
 // agentRun 返回一次 ReAct 轨迹（当前是回放种子数据）。

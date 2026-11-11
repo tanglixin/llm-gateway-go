@@ -55,3 +55,20 @@ func asInt(v any) int {
 	}
 	return 0
 }
+
+// Estimate 粗略估算一段文本的 token 数（ASCII 4 字符/token，CJK 1.5 字符/token）。
+func Estimate(text string) int {
+	var ascii, wide int
+	for _, r := range text {
+		if r < 128 {
+			ascii++
+		} else {
+			wide++
+		}
+	}
+	n := ascii/4 + wide*2/3
+	if n < 1 {
+		return 1
+	}
+	return n
+}
