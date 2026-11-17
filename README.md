@@ -639,3 +639,4 @@ git commit -m "fix: 熔断半开判定" -m "Human-Only: yes"
 
 报告给出 `[下界, 上界]` 而不是单一百分比：**下界**只算 `AI-Scope: full` 提交的新增行，**上界**把 `partial` 也算进去。**覆盖率不足时所有数字都是下限**，务必一起阅读。完整口径、排除规则、双仓库配置与面试讲解要点见 [docs/ai-code-metrics.md](docs/ai-code-metrics.md)。
 # llm-gateway-go
+# llm-gateway-go
