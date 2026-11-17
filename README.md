@@ -619,3 +619,23 @@ $ docker compose exec postgres psql -U llm -d llm -c \
 - [docs/demo.md](docs/demo.md) — 3 分钟演示脚本（点什么、说什么、看什么）
 - [docs/architecture.md](docs/architecture.md) — 分层、数据流、会话持久化、前端接入、已知取舍
 - [docs/api-contract.md](docs/api-contract.md) — 12 个页面的接口契约与实现状态
+- [docs/ai-code-metrics.md](docs/ai-code-metrics.md) — AI 代码率统计口径、提交规范与复现命令
+
+## AI 代码率统计
+
+Git 无法识别代码由谁编写，因此本项目采用**声明式区间口径**：提交时在 commit message 里用 trailer 声明 AI 参与程度，脚本聚合成可审计的上下界，并同时输出标注覆盖率。
+
+```bash
+make ai-ratio            # 终端表格（含分层）
+make ai-ratio-md         # 生成 docs/ai-code-report.md
+make ai-ratio-ci         # CI 闸门：标注覆盖率 < 80% 则失败
+make ai-ratio-baseline   # 从当前 HEAD 开始统计，不改写历史
+
+git commit -m "feat(rag): 混合检索" \
+           -m "AI-Generated-By: claude-code" \
+           -m "AI-Scope: full"
+git commit -m "fix: 熔断半开判定" -m "Human-Only: yes"
+```
+
+报告给出 `[下界, 上界]` 而不是单一百分比：**下界**只算 `AI-Scope: full` 提交的新增行，**上界**把 `partial` 也算进去。**覆盖率不足时所有数字都是下限**，务必一起阅读。完整口径、排除规则、双仓库配置与面试讲解要点见 [docs/ai-code-metrics.md](docs/ai-code-metrics.md)。
+# llm-gateway-go
