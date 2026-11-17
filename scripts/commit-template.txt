@@ -1,0 +1,20 @@
+# 提交主题（<= 72 字符）：type(scope): 一句话说明改了什么
+#
+
+
+# ---- AI 代码率声明（四选一，删除不适用行，详见 docs/ai-code-metrics.md）----
+# AI 参与了本次编写时填写工具名：
+# AI-Generated-By: claude-code
+# 整体由 AI 生成并人工审定填 full；仅部分生成或大幅改写填 partial（缺省）：
+# AI-Scope: partial
+# 纯人工编写请改用下面这一行，并删掉上面两行：
+# Human-Only: yes
+# 可选：记录人工审查
+# AI-Reviewed: yes
+
+
+# ---- 提醒 ----
+# 1) 未标注会拉低标注覆盖率，报告里的比例将只是下限。
+# 2) AI-Generated-By 与 Human-Only 同时出现视为冲突，按未标注处理。
+# 3) 同时声明 AI-Scope 但缺少 AI-Generated-By 不生效。
+# 4) 以 # 开头的注释行不会进入提交信息。

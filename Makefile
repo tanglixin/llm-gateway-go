@@ -1,7 +1,8 @@
 COMPOSE := cd deploy && docker compose
 MODEL   ?= qwen2:0.5b
+AI_REPOS ?= .,../llm-gateway-ui
 
-.PHONY: up down ps logs pull run demo test build fmt vet verify clean
+.PHONY: up down ps logs pull run demo test build fmt vet verify clean ai-ratio ai-ratio-md ai-ratio-ci ai-ratio-baseline
 
 up: ## 起基础设施（PG + Redis + MinIO + Ollama）
 	cd deploy && docker compose up -d
@@ -42,3 +43,16 @@ verify: ## 检查基础设施连通性
 
 clean:
 	rm -rf bin
+
+ai-ratio: ## 统计 AI 代码率（终端表格，口径见 docs/ai-code-metrics.md）
+	go run ./cmd/airatio -repos=$(AI_REPOS) -format=table
+
+ai-ratio-md: ## 生成 Markdown 报告到 docs/ai-code-report.md
+	go run ./cmd/airatio -repos=$(AI_REPOS) -format=markdown -out=docs/ai-code-report.md
+
+ai-ratio-ci: ## CI 闸门：标注覆盖率不足则非零退出
+	go run ./cmd/airatio -repos=$(AI_REPOS) -format=json -strict -min-coverage=0.8
+
+ai-ratio-baseline: ## 以当前 HEAD 为统计起点（不改写 git 历史）
+	git rev-parse HEAD > .ai-ratio-baseline
+	@echo "已写入 .ai-ratio-baseline: $$(cat .ai-ratio-baseline)"
